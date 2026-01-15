@@ -166,7 +166,6 @@ members = [
     "bitcoinleveldb-db", 
     "bitcoinleveldb-dbconstructor", 
     "bitcoinleveldb-dbimpl", 
-    "bitcoinleveldb-dbimplinner", 
     "bitcoinleveldb-dbimplwriter", 
     "bitcoinleveldb-dbinterface", 
     "bitcoinleveldb-dbiter", 
@@ -263,8 +262,11 @@ members = [
     "bitcoinwallet-library", 
     "bitcoinwallet-receive", 
     "bitcoinwallet-salvage", 
-    "bitcoinwallet-spend"
-, "bitcoinleveldb-versionsetbuilder", "bitcoinleveldb-versionsetutil", "bitcoinleveldb-versionsetinterface"]
+    "bitcoinwallet-spend", 
+    "bitcoinleveldb-versionsetutil", 
+    "bitcoinleveldb-versionsetinterface", 
+    "bitcoinleveldb-mockversionset"
+, "bitcoinsecp256k1-modinv64", "bitcoinsecp256k1-modinv32", "bitcoinsecp256k1-fe10x26", "bitcoinsecp256k1-fe5x52", "bitcoinsecp256k1-eccontext", "bitcoinsecp256k1-ecdh", "bitcoinsecp256k1-ecdsa", "bitcoinsecp256k1-ecdsasignature", "bitcoinsecp256k1-eckey", "bitcoinsecp256k1-ecmult", "bitcoinsecp256k1-ecmultgen", "bitcoinsecp256k1-ecmultconst"]
 
 [workspace.dependencies]
 #qmetaobject            = "0.2.7"

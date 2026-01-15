@@ -191,6 +191,47 @@ impl core::fmt::Debug for Options {
     }
 }
 
+impl Options {
+
+    pub fn with_env(env: Rc<RefCell<dyn Env>>) -> Self {
+        let mut x = Self::default();
+        x.set_env(Some(env));
+        x
+    }
+
+    pub fn internal_key_comparator(&self) -> InternalKeyComparator {
+        let user_cmp_ptr: *const dyn SliceComparator =
+            self.comparator().as_ref() as *const dyn SliceComparator;
+
+        trace!(
+            user_comparator_ptr = %format!("{:p}", user_cmp_ptr),
+            "Options::internal_key_comparator"
+        );
+
+        InternalKeyComparator::new(user_cmp_ptr)
+    }
+
+    pub fn delete_info_log_if_owned(&mut self) -> Status {
+        if let Some(ptr) = self.info_log.take() {
+            unsafe {
+                drop(Box::from_raw(ptr));
+            }
+        }
+        Status::ok()
+    }
+
+    pub fn delete_block_cache_if_owned(&mut self) -> Status {
+        let cache_ptr: *mut Cache = self.block_cache;
+        if !cache_ptr.is_null() {
+            unsafe {
+                drop(Box::from_raw(cache_ptr));
+            }
+            self.block_cache = core::ptr::null_mut();
+        }
+        Status::ok()
+    }
+}
+
 impl Default for Options {
 
     fn default() -> Self {
@@ -219,5 +260,103 @@ impl Default for Options {
             // A no-op / pass-through filter is the closest semantic match.
             filter_policy:          Arc::new(NullFilterPolicy::default()),
         }
+    }
+}
+
+#[cfg(test)]
+mod options_defaults_and_accessors_suite {
+    use super::*;
+    use tracing::{debug, info, trace};
+
+    #[traced_test]
+    fn options_default_matches_expected_constants_and_null_pointers() {
+        trace!("options_defaults_and_accessors_suite: start");
+
+        let opts = Options::default();
+
+        info!(
+            create_if_missing = *opts.create_if_missing(),
+            error_if_exists   = *opts.error_if_exists(),
+            paranoid_checks   = *opts.paranoid_checks(),
+            write_buffer_size = *opts.write_buffer_size(),
+            max_open_files    = *opts.max_open_files(),
+            block_cache_ptr   = %format!("{:p}", *opts.block_cache()),
+            block_size        = *opts.block_size(),
+            block_restart_interval = *opts.block_restart_interval(),
+            max_file_size     = *opts.max_file_size(),
+            compression = ?opts.compression(),
+            reuse_logs  = *opts.reuse_logs(),
+            env_is_some = opts.env().is_some(),
+            info_log_is_some = opts.info_log().is_some(),
+            "Options::default snapshot"
+        );
+
+        assert!(!*opts.create_if_missing());
+        assert!(!*opts.error_if_exists());
+        assert!(!*opts.paranoid_checks());
+
+        assert_eq!(*opts.write_buffer_size(), 4 * 1024 * 1024);
+        assert_eq!(*opts.max_open_files(), 1000);
+
+        assert!((*opts.block_cache()).is_null());
+
+        assert_eq!(*opts.block_size(), 4 * 1024);
+        assert_eq!(*opts.block_restart_interval(), 16);
+        assert_eq!(*opts.max_file_size(), 2 * 1024 * 1024);
+        assert_eq!(*opts.compression(), CompressionType::Snappy);
+        assert!(!*opts.reuse_logs());
+
+        assert!(
+            opts.env().is_none(),
+            "expected Options::default to leave env unset"
+        );
+        assert!(
+            opts.info_log().is_none(),
+            "expected default info_log to be unset"
+        );
+
+        let cmp_name = opts.comparator().name();
+        let fp_name = opts.filter_policy().name();
+        debug!(cmp_name = %cmp_name, fp_name = %fp_name, "trait-object names");
+
+        assert!(
+            !cmp_name.as_ref().is_empty(),
+            "comparator name must be non-empty"
+        );
+        assert_eq!(fp_name.as_ref(), "null-filter-policy");
+
+        trace!("options_defaults_and_accessors_suite: done");
+    }
+
+    #[traced_test]
+    fn options_internal_key_comparator_is_constructible_and_named() {
+        trace!("options_defaults_and_accessors_suite: start");
+
+        let opts = Options::default();
+        let icmp = opts.internal_key_comparator();
+
+        let name = icmp.name();
+        info!(name = %name, "InternalKeyComparator name()");
+
+        assert!(!name.as_ref().is_empty());
+
+        trace!("options_defaults_and_accessors_suite: done");
+    }
+
+    #[traced_test]
+    fn options_debug_format_is_non_panicking_and_includes_field_names() {
+        trace!("options_defaults_and_accessors_suite: start");
+
+        let opts = Options::default();
+        let s = format!("{:?}", opts);
+
+        debug!(dbg = %s, "Options debug output");
+
+        assert!(s.contains("Options"));
+        assert!(s.contains("max_open_files"));
+        assert!(s.contains("write_buffer_size"));
+        assert!(s.contains("compression"));
+
+        trace!("options_defaults_and_accessors_suite: done");
     }
 }

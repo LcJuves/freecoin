@@ -2,55 +2,84 @@
 crate::ix!();
 
 impl DBImpl {
-    
-    #[EXCLUSIVE_LOCKS_REQUIRED(mutex_)]
-    pub fn write_level_0table(&mut self, 
-        mem:  *mut MemTable,
+    #[EXCLUSIVE_LOCKS_REQUIRED(mutex)]
+    pub fn write_level_0table(
+        &mut self,
+        mem: *mut MemTable,
         edit: *mut VersionEdit,
-        base: *mut Version) -> crate::Status {
-        
-        todo!();
+        base: *mut Version,
+    ) -> crate::Status { 
+        todo!(); 
         /*
-            mutex_.AssertHeld();
-      const uint64_t start_micros = env_->NowMicros();
-      FileMetaData meta;
-      meta.number = versions_->NewFileNumber();
-      pending_outputs_.insert(meta.number);
-      Iterator* iter = mem->NewIterator();
-      Log(options_.info_log, "Level-0 table #%llu: started",
-          (unsigned long long)meta.number);
+        self.mutex.assert_held();
 
-      Status s;
-      {
-        mutex_.Unlock();
-        s = BuildTable(dbname_, env_, options_, table_cache_, iter, &meta);
-        mutex_.Lock();
-      }
+        let start_micros: u64 = self.env.borrow_mut().now_micros();
 
-      Log(options_.info_log, "Level-0 table #%llu: %lld bytes %s",
-          (unsigned long long)meta.number, (unsigned long long)meta.file_size,
-          s.ToString().c_str());
-      delete iter;
-      pending_outputs_.erase(meta.number);
+        let mut meta: FileMetaData = Default::default();
+        meta.set_number(unsafe { (*self.versions).new_file_number() });
 
-      // Note that if file_size is zero, the file has been deleted and
-      // should not be added to the manifest.
-      int level = 0;
-      if (s.ok() && meta.file_size > 0) {
-        const Slice min_user_key = meta.smallest.user_key();
-        const Slice max_user_key = meta.largest.user_key();
-        if (base != nullptr) {
-          level = base->PickLevelForMemTableOutput(min_user_key, max_user_key);
+        self.pending_outputs.insert(meta.number());
+
+        let iter: *mut LevelDBIterator = unsafe { (*mem).new_iterator() };
+
+        tracing::info!(file_number = meta.number(), "Level-0 table started");
+
+        let mut s: Status = Status::ok();
+
+        self.mutex.unlock();
+        s = build_table(
+            &self.dbname,
+            &mut *self.env.borrow_mut(),
+            &self.options,
+            self.table_cache,
+            iter,
+            &mut meta,
+        );
+        self.mutex.lock();
+
+        tracing::info!(
+            file_number = meta.number(),
+            bytes = meta.file_size(),
+            status = %s.to_string(),
+            "Level-0 table finished"
+        );
+
+        unsafe {
+            drop(Box::from_raw(iter));
         }
-        edit->AddFile(level, meta.number, meta.file_size, meta.smallest,
-                      meta.largest);
-      }
 
-      CompactionStats stats;
-      stats.micros = env_->NowMicros() - start_micros;
-      stats.bytes_written = meta.file_size;
-      stats_[level].Add(stats);
-      return s;
-        */
+        self.pending_outputs.remove(&meta.number());
+
+        // Note that if file_size is zero, the file has been deleted and
+        // should not be added to the manifest.
+        let mut level: i32 = 0;
+
+        if s.is_ok() && meta.file_size() > 0 {
+            let min_user_key: Slice = meta.smallest().user_key();
+            let max_user_key: Slice = meta.largest().user_key();
+
+            if !base.is_null() {
+                level = unsafe { (*base).pick_level_for_mem_table_output(min_user_key, max_user_key) };
+            }
+
+            unsafe {
+                (*edit).add_file(
+                    level,
+                    *meta.number(),
+                    *meta.file_size(),
+                    meta.smallest(),
+                    meta.largest(),
+                );
+            }
+        }
+
+        let mut stats: CompactionStats = Default::default();
+        stats.set_micros((self.env.borrow_mut().now_micros() - start_micros) as i64);
+        stats.set_bytes_written(meta.file_size() as i64);
+
+        self.stats[level as usize].add(stats);
+
+        s
+                         */
     }
 }

@@ -2,33 +2,47 @@
 crate::ix!();
 
 impl DBImpl {
-    
-    pub fn open_compaction_output_file(&mut self, compact: *mut CompactionState) -> crate::Status {
-        
-        todo!();
+    pub fn open_compaction_output_file(&mut self, compact: *mut CompactionState) -> crate::Status { 
+        todo!(); 
         /*
-            assert(compact != nullptr);
-      assert(compact->builder == nullptr);
-      uint64_t file_number;
-      {
-        mutex_.Lock();
-        file_number = versions_->NewFileNumber();
-        pending_outputs_.insert(file_number);
-        CompactionState::Output out;
-        out.number = file_number;
-        out.smallest.Clear();
-        out.largest.Clear();
-        compact->outputs.push_back(out);
-        mutex_.Unlock();
-      }
+        assert!(!compact.is_null());
+        assert!(unsafe { (*compact).builder() }.is_null());
 
-      // Make the output file
-      std::string fname = TableFileName(dbname_, file_number);
-      Status s = env_->NewWritableFile(fname, &compact->outfile);
-      if (s.ok()) {
-        compact->builder = new TableBuilder(options_, compact->outfile);
-      }
-      return s;
-        */
+        let file_number: u64;
+
+        self.mutex.lock();
+        file_number = unsafe { (*self.versions).new_file_number() };
+        self.pending_outputs_mut().insert(file_number);
+
+        unsafe {
+            let out = CompactionStateOutput {
+                number: file_number,
+                smallest: InternalKey::new_empty(),
+                largest: InternalKey::new_empty(),
+                file_size: 0,
+            };
+            (*compact).outputs_mut().push(out);
+        }
+
+        self.mutex.unlock();
+
+        // Make the output file
+        let fname: String = table_file_name(&self.dbname, file_number);
+
+        let mut s: Status = self
+            .env
+            .borrow_mut()
+            .new_writable_file(&fname, unsafe { &mut (*compact).outfile() });
+
+        if s.is_ok() {
+            unsafe {
+                (*compact).set_builder(
+                    Box::into_raw(Box::new(TableBuilder::new(&self.options, (*compact).outfile())))
+                );
+            }
+        }
+
+        s
+                                                                                                    */
     }
 }

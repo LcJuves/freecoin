@@ -2,57 +2,70 @@
 crate::ix!();
 
 impl DBImpl {
-    
-    pub fn new_internal_iterator(&mut self, 
-        options:         &ReadOptions,
+
+    pub fn new_internal_iterator(
+        &mut self,
+        options: &ReadOptions,
         latest_snapshot: *mut SequenceNumber,
-        seed:            *mut u32) -> *mut LevelDBIterator {
-        
-        todo!();
+        seed: *mut u32,
+    ) -> *mut LevelDBIterator { 
+        todo!(); 
         /*
-            mutex_.Lock();
-      *latest_snapshot = versions_->LastSequence();
+        self.mutex.lock();
+        unsafe {
+            *latest_snapshot = (*self.versions).last_sequence();
+        }
 
-      // Collect together all needed child iterators
-      std::vector<Iterator*> list;
-      list.push_back(mem_->NewIterator());
-      mem_->Ref();
-      if (imm_ != nullptr) {
-        list.push_back(imm_->NewIterator());
-        imm_->Ref();
-      }
-      versions_->current()->AddIterators(options, &list);
-      Iterator* internal_iter =
-          NewMergingIterator(&internal_comparator_, &list[0], list.size());
-      versions_->current()->Ref();
+        // Collect together all needed child iterators
+        let mut list: Vec<*mut LevelDBIterator> = Vec::new();
 
-      IterState* cleanup = new IterState(&mutex_, mem_, imm_, versions_->current());
-      internal_iter->RegisterCleanup(CleanupIteratorState, cleanup, nullptr);
+        unsafe {
+            list.push((*self.mem).new_iterator());
+            (*self.mem).ref_();
 
-      *seed = ++seed_;
-      mutex_.Unlock();
-      return internal_iter;
-        */
+            if !self.imm.is_null() {
+                list.push((*self.imm).new_iterator());
+                (*self.imm).ref_();
+            }
+
+            let current: *mut Version = (*self.versions).current();
+            (*current).add_iterators(options, &mut list);
+
+            let internal_iter: *mut LevelDBIterator =
+                new_merging_iterator(&self.internal_comparator, &list[0], list.len());
+
+            (*current).ref_();
+
+            let cleanup: *mut IterState = Box::into_raw(Box::new(IterState::new(
+                &mut self.mutex,
+                self.mem,
+                self.imm,
+                current,
+            )));
+
+            (*internal_iter).register_cleanup(cleanup_iterator_state, cleanup as *mut core::ffi::c_void, core::ptr::null_mut());
+
+            self.seed = self.seed.wrapping_add(1);
+            *seed = self.seed;
+
+            self.mutex.unlock();
+
+            internal_iter
+        }
+                                */
     }
-    
-    /**
-      | Return an internal iterator over the current
-      | state of the database.
-      |
-      | The keys of this iterator are internal keys
-      | (see format.h).
-      |
-      | The returned iterator should be deleted when
-      | no longer needed.
-      */
+
+    /// Return an internal iterator over the current
+    /// state of the database.
+    /// 
+    /// The keys of this iterator are internal keys
+    /// (see format.h).
+    /// 
+    /// The returned iterator should be deleted when
+    /// no longer needed.
     pub fn test_new_internal_iterator(&mut self) -> *mut LevelDBIterator {
-        
-        todo!();
-        /*
-            SequenceNumber ignored;
-      uint32_t ignored_seed;
-      return NewInternalIterator(ReadOptions(), &ignored, &ignored_seed);
-        */
+        let mut ignored: SequenceNumber = 0;
+        let mut ignored_seed: u32 = 0;
+        self.new_internal_iterator(&ReadOptions::default(), &mut ignored, &mut ignored_seed)
     }
-
 }

@@ -1,0 +1,52 @@
+// ---------------- [ File: bitcoinsecp256k1-group/src/gej_rescale.rs ]
+crate::ix!();
+
+/// Rescale a jacobian point by b which must be non-zero. Constant-time.
+/// 
+pub fn gej_rescale(r: *mut Gej, s: *const Fe) {
+    unsafe {
+        /* Operations: 4 mul, 1 sqr */
+        let mut zz: Fe = core::mem::zeroed();
+        verify_check!(fe_is_zero(s) == 0);
+        fe_sqr(core::ptr::addr_of_mut!(zz), s);
+
+        let rx: *mut Fe = core::ptr::addr_of_mut!((*r).x);
+
+        /* r->x *= s^2 */
+        fe_mul(rx, rx as *const Fe, core::ptr::addr_of!(zz)); 
+
+        let ry: *mut Fe = core::ptr::addr_of_mut!((*r).y);
+        fe_mul(ry, ry as *const Fe, core::ptr::addr_of!(zz));
+
+        /* r->y *= s^3 */
+        fe_mul(ry, ry as *const Fe, s); 
+
+        let rz: *mut Fe = core::ptr::addr_of_mut!((*r).z);
+
+        /* r->z *= s   */
+        fe_mul(rz, rz as *const Fe, s); 
+    }
+}
+
+#[cfg(test)]
+mod gej_rescale_rs_exhaustive_test_suite {
+    use super::*;
+
+    #[traced_test]
+    fn gej_rescale_preserves_affine_point_and_updates_z_by_scale_factor() {
+        tracing::info!("Validating gej_rescale preserves affine point representation and multiplies z by s.");
+
+        unsafe {
+            let mut a: Gej = core::mem::zeroed();
+            gej_set_ge(core::ptr::addr_of_mut!(a), core::ptr::addr_of!(ge_const_g));
+
+            let original: Gej = core::ptr::read(core::ptr::addr_of!(a));
+
+            let s: Fe = secp256k1_group_exhaustive_test_support::fe_int(7);
+            gej_rescale(core::ptr::addr_of_mut!(a), core::ptr::addr_of!(s));
+
+            assert!(secp256k1_group_exhaustive_test_support::gej_affine_eq(&a, &original));
+            assert!(fe_equal_var(core::ptr::addr_of!(a.z), core::ptr::addr_of!(s)) != 0);
+        }
+    }
+}

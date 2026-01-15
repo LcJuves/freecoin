@@ -2,132 +2,166 @@
 crate::ix!();
 
 impl DBImpl {
-    
-    #[EXCLUSIVE_LOCKS_REQUIRED(mutex_)]
-    pub fn recover_log_file(&mut self, 
-        log_number:    u64,
-        last_log:      bool,
+
+    #[EXCLUSIVE_LOCKS_REQUIRED(mutex)]
+    pub fn recover_log_file(
+        &mut self,
+        log_number: u64,
+        last_log: bool,
         save_manifest: *mut bool,
-        edit:          *mut VersionEdit,
-        max_sequence:  *mut SequenceNumber) -> crate::Status {
-        
-        todo!();
+        edit: *mut VersionEdit,
+        max_sequence: *mut SequenceNumber,
+    ) -> crate::Status { 
+        todo!(); 
         /*
-            struct LogReporter : public LogReader::Reporter {
-        Env* env;
-        Logger* info_log;
-        const char* fname;
-        Status* status;  // null if options_.paranoid_checks==false
-        c_void Corruption(size_t bytes, const Status& s) override {
-          Log(info_log, "%s%s: dropping %d bytes; %s",
-              (this->status == nullptr ? "(ignoring error) " : ""), fname,
-              static_cast<int>(bytes), s.ToString().c_str());
-          if (this->status != nullptr && this->status->ok()) *this->status = s;
-        }
-      };
 
-      mutex_.AssertHeld();
+        self.mutex.assert_held();
 
-      // Open the log file
-      std::string fname = LogFileName(dbname_, log_number);
-      SequentialFile* file;
-      Status status = env_->NewSequentialFile(fname, &file);
-      if (!status.ok()) {
-        MaybeIgnoreError(&status);
-        return status;
-      }
+        // Open the log file
+        let fname: String = log_file_name(&self.dbname, log_number);
 
-      // Create the log reader.
-      LogReporter reporter;
-      reporter.env = env_;
-      reporter.info_log = options_.info_log;
-      reporter.fname = fname.c_str();
-      reporter.status = (options_.paranoid_checks ? &status : nullptr);
-      // We intentionally make LogReader do checksumming even if
-      // paranoid_checks==false so that corruptions cause entire commits
-      // to be skipped instead of propagating bad information (like overly
-      // large sequence numbers).
-      LogReader reader(file, &reporter, true /*checksum*/, 0 /*initial_offset*/);
-      Log(options_.info_log, "Recovering log #%llu",
-          (unsigned long long)log_number);
+        let mut file: *mut dyn SequentialFile = core::ptr::null_mut();
+        let mut status: Status = self.env.borrow_mut().new_sequential_file(&fname, &mut file);
 
-      // Read all the records and add to a memtable
-      std::string scratch;
-      Slice record;
-      WriteBatch batch;
-      int compactions = 0;
-      MemTable* mem = nullptr;
-      while (reader.ReadRecord(&record, &scratch) && status.ok()) {
-        if (record.size() < 12) {
-          reporter.Corruption(record.size(),
-                              Status::Corruption("log record too small", fname));
-          continue;
-        }
-        WriteBatchInternal::SetContents(&batch, record);
-
-        if (mem == nullptr) {
-          mem = new MemTable(internal_comparator_);
-          mem->Ref();
-        }
-        status = WriteBatchInternal::InsertInto(&batch, mem);
-        MaybeIgnoreError(&status);
-        if (!status.ok()) {
-          break;
-        }
-        const SequenceNumber last_seq = WriteBatchInternal::Sequence(&batch) +
-                                        WriteBatchInternal::Count(&batch) - 1;
-        if (last_seq > *max_sequence) {
-          *max_sequence = last_seq;
+        if !status.is_ok() {
+            self.maybe_ignore_error(&mut status as *mut Status);
+            return status;
         }
 
-        if (mem->ApproximateMemoryUsage() > options_.write_buffer_size) {
-          compactions++;
-          *save_manifest = true;
-          status = WriteLevel0Table(mem, edit, nullptr);
-          mem->Unref();
-          mem = nullptr;
-          if (!status.ok()) {
-            // Reflect errors immediately so that conditions like full
-            // file-systems cause the DB::Open() to fail.
-            break;
-          }
+        // Create the log reader.
+        let mut reporter = LogReporter {
+            info_log: self.options.info_log(),
+            fname: fname.clone(),
+            status: if self.options.paranoid_checks() {
+                &mut status as *mut Status
+            } else {
+                core::ptr::null_mut()
+            },
+        };
+
+        // We intentionally make LogReader do checksumming even if
+        // paranoid_checks==false so that corruptions cause entire commits
+        // to be skipped instead of propagating bad information (like overly
+        // large sequence numbers).
+        let mut reader: LogReader = LogReader::new(file, &mut reporter, true, 0);
+
+        tracing::info!(log_number, "Recovering log");
+
+        // Read all the records and add to a memtable
+        let mut scratch: String = String::new();
+        let mut record: Slice = Slice::empty();
+
+        let mut batch: WriteBatch = WriteBatch::default();
+        let mut compactions: i32 = 0;
+
+        let mut mem: *mut MemTable = core::ptr::null_mut();
+
+        while reader.read_record(&mut record, &mut scratch) && status.is_ok() {
+            if record.size() < 12 {
+                reporter.corruption(
+                    record.size(),
+                    &Status::corruption("log record too small", &fname),
+                );
+                continue;
+            }
+
+            write_batch_internal::set_contents(&mut batch, record);
+
+            if mem.is_null() {
+                mem = Box::into_raw(Box::new(MemTable::new(&self.internal_comparator)));
+                unsafe { (*mem).ref_(); }
+            }
+
+            status = write_batch_internal::insert_into(&batch, mem);
+            self.maybe_ignore_error(&mut status as *mut Status);
+
+            if !status.is_ok() {
+                break;
+            }
+
+            let last_seq: SequenceNumber =
+                write_batch_internal::sequence(&batch) + write_batch_internal::count(&batch) - 1;
+
+            unsafe {
+                if last_seq > *max_sequence {
+                    *max_sequence = last_seq;
+                }
+            }
+
+            if unsafe { (*mem).approximate_memory_usage() } > self.options.write_buffer_size() {
+                compactions += 1;
+                unsafe {
+                    *save_manifest = true;
+                }
+
+                status = self.write_level_0table(mem, edit, core::ptr::null_mut());
+
+                unsafe {
+                    (*mem).unref();
+                }
+                mem = core::ptr::null_mut();
+
+                if !status.is_ok() {
+                    // Reflect errors immediately so that conditions like full
+                    // file-systems cause the DB::Open() to fail.
+                    break;
+                }
+            }
         }
-      }
 
-      delete file;
-
-      // See if we should keep reusing the last log file.
-      if (status.ok() && options_.reuse_logs && last_log && compactions == 0) {
-        assert(logfile_ == nullptr);
-        assert(log_ == nullptr);
-        assert(mem_ == nullptr);
-        uint64_t lfile_size;
-        if (env_->GetFileSize(fname, &lfile_size).ok() &&
-            env_->NewAppendableFile(fname, &logfile_).ok()) {
-          Log(options_.info_log, "Reusing old log %s \n", fname.c_str());
-          log_ = new LogWriter(logfile_, lfile_size);
-          logfile_number_ = log_number;
-          if (mem != nullptr) {
-            mem_ = mem;
-            mem = nullptr;
-          } else {
-            // mem can be nullptr if lognum exists but was empty.
-            mem_ = new MemTable(internal_comparator_);
-            mem_->Ref();
-          }
+        unsafe {
+            drop(Box::from_raw(file));
         }
-      }
 
-      if (mem != nullptr) {
-        // mem did not get reused; compact it.
-        if (status.ok()) {
-          *save_manifest = true;
-          status = WriteLevel0Table(mem, edit, nullptr);
+        // See if we should keep reusing the last log file.
+        if status.is_ok() && self.options.reuse_logs() && last_log && compactions == 0 {
+            assert!(self.logfile.is_null());
+            assert!(self.log.is_null());
+            assert!(self.mem.is_null());
+
+            let mut lfile_size: u64 = 0;
+
+            if self.env.borrow_mut().get_file_size(&fname, &mut lfile_size).is_ok()
+                && self
+                    .env
+                    .borrow_mut()
+                    .new_appendable_file(&fname, &mut self.logfile)
+                    .is_ok()
+            {
+                tracing::info!(file = %fname, "Reusing old log");
+                self.log = Box::into_raw(Box::new(LogWriter::new_with_offset(
+                    self.logfile,
+                    lfile_size,
+                )));
+                self.logfile_number = log_number;
+
+                if !mem.is_null() {
+                    self.mem = mem;
+                    mem = core::ptr::null_mut();
+                } else {
+                    // mem can be nullptr if lognum exists but was empty.
+                    self.mem = Box::into_raw(Box::new(MemTable::new(&self.internal_comparator)));
+                    unsafe {
+                        (*self.mem).ref_();
+                    }
+                }
+            }
         }
-        mem->Unref();
-      }
 
-      return status;
-        */
+        if !mem.is_null() {
+            if status.is_ok() {
+                unsafe {
+                    *save_manifest = true;
+                }
+                status = self.write_level_0table(mem, edit, core::ptr::null_mut());
+            }
+
+            unsafe {
+                (*mem).unref();
+            }
+        }
+
+        status
+            */
     }
 }

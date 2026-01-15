@@ -3,28 +3,26 @@ crate::ix!();
 
 impl DBImpl {
     
-    /**
-      | Force current memtable contents to
-      | be compacted.
-      |
-      */
-    pub fn test_compact_mem_table(&mut self) -> crate::Status {
-        
-        todo!();
+    /// Force current memtable contents to be compacted.
+    pub fn test_compact_mem_table(&mut self) -> crate::Status { 
+        todo!(); 
         /*
-            // nullptr batch means just wait for earlier writes to be done
-      Status s = Write(WriteOptions(), nullptr);
-      if (s.ok()) {
-        // Wait until the compaction completes
-        MutexLock l(&mutex_);
-        while (imm_ != nullptr && bg_error_.ok()) {
-          background_work_finished_signal_.Wait();
+        // nullptr batch means just wait for earlier writes to be done
+        let mut s: Status = <DBImpl as DBWrite>::write(self, &WriteOptions::default(), core::ptr::null_mut());
+
+        if s.is_ok() {
+            // Wait until the compaction completes
+            self.mutex.lock();
+            while !self.imm.is_null() && self.bg_error.is_ok() {
+                self.background_work_finished_signal.wait();
+            }
+            if !self.imm.is_null() {
+                s = self.bg_error.clone();
+            }
+            self.mutex.unlock();
         }
-        if (imm_ != nullptr) {
-          s = bg_error_;
-        }
-      }
-      return s;
-        */
+
+        s
+                                                                */
     }
 }

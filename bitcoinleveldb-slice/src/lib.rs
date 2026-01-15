@@ -5,4 +5,24 @@
 #[macro_use] mod imports; use imports::*;
 
 x!{slice}
-x!{range}
+
+/// A range of keys
+#[derive(Default, Getters)]
+#[getset(get = "pub")]
+pub struct Range {
+
+    /// Included in the range
+    start: Slice,
+
+    /// Not included in the range
+    limit: Slice,
+}
+
+impl Range {
+
+    pub fn new(
+        s: Slice,
+        l: Slice) -> Self {
+        Self { start: s, limit: l }
+    }
+}

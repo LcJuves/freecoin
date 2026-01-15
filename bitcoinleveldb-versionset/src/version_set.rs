@@ -1,74 +1,180 @@
 // ---------------- [ File: bitcoinleveldb-versionset/src/version_set.rs ]
 crate::ix!();
 
-///------------------
+#[derive(Builder, CopyGetters, Getters, MutGetters, Setters)]
+#[builder(name = "VersionSetStateBuilder", vis = "pub(crate)", pattern = "owned")]
 pub struct VersionSet {
+    env: Box<dyn Env>,
 
-    env:                  Box<dyn Env>,
-    dbname:               String,
-    options:              *const Options,
-    table_cache:          *const TableCache,
-    icmp:                 InternalKeyComparator,
-    next_file_number:     u64,
+    #[getset(get = "pub(crate)")]
+    dbname: String,
+
+    #[getset(get_copy = "pub(crate)")]
+    options: *const Options,
+
+    #[getset(get_copy = "pub(crate)")]
+    table_cache: *const TableCache,
+
+    #[getset(get = "pub(crate)")]
+    icmp: InternalKeyComparator,
+
+    #[getset(get_copy = "pub(crate)", set = "pub(crate)")]
+    next_file_number: u64,
+
+    #[getset(get_copy = "pub(crate)", set = "pub(crate)")]
     manifest_file_number: u64,
-    last_sequence:        u64,
-    log_number:           u64,
 
-    /**
-      | 0 or backing store for memtable being
-      | compacted
-      |
-      */
-    prev_log_number:      u64,
+    #[getset(get_copy = "pub(crate)", set = "pub(crate)")]
+    last_sequence: u64,
 
-    /**
-      | Opened lazily
-      |
-      */
-    descriptor_file:      *mut dyn WritableFile,
+    #[getset(get_copy = "pub(crate)", set = "pub(crate)")]
+    log_number: u64,
 
-    descriptor_log:       *mut LogWriter,
+    /// 0 or backing store for memtable being
+    /// compacted
+    /// 
+    #[getset(get_copy = "pub(crate)", set = "pub(crate)")]
+    prev_log_number: u64,
 
-    /**
-      | Head of circular doubly-linked list
-      | of versions.
-      |
-      */
-    dummy_versions:       Version,
+    /// Opened lazily
+    /// 
+    #[getset(get_copy = "pub(crate)", set = "pub(crate)")]
+    descriptor_file: *mut dyn WritableFile,
 
-    /**
-      | == dummy_versions_.prev_
-      |
-      */
-    current:              *mut Version,
+    #[getset(get_copy = "pub(crate)", set = "pub(crate)")]
+    descriptor_log: *mut LogWriter,
 
-    /**
-      | Per-level key at which the next compaction
-      | at that level should start.
-      | 
-      | Either an empty string, or a valid
-      | 
-      | InternalKey.
-      |
-      */
-    compact_pointer:      [String; NUM_LEVELS],
+    /// Head of circular doubly-linked list
+    /// of versions.
+    /// 
+    #[getset(get_mut = "pub(crate)")]
+    dummy_versions: Version,
+
+    /// == dummy_versions_.prev_
+    /// 
+    #[getset(get_copy = "pub(crate)", set = "pub(crate)")]
+    current: *mut Version,
+
+    /// Per-level key at which the next compaction
+    /// at that level should start.
+    /// 
+    /// Either an empty string, or a valid
+    /// 
+    /// InternalKey.
+    /// 
+    #[getset(get_mut = "pub(crate)")]
+    compact_pointer: [String; NUM_LEVELS],
 }
 
-impl GetInternalKeyComparator for VersionSet {
-    fn icmp(&self) -> &InternalKeyComparator {
-        &self.icmp
-    }
-}
+impl VersionSet {
+    pub(crate) fn new_internal(
+        dbname: &String,
+        options: *const Options,
+        table_cache: *mut TableCache,
+        cmp: *const InternalKeyComparator,
+    ) -> Self {
+        assert!(!options.is_null(), "VersionSet::new_internal: options is null");
+        assert!(!cmp.is_null(), "VersionSet::new_internal: cmp is null");
 
-impl GetTableCache for VersionSet {
-    fn table_cache(&self) -> *mut TableCache {
-        self.table_cache_
-    }
-}
+        let env_box: Box<dyn Env> = unsafe {
+            let env_opt = (*options).env();
+            let env_rc = env_opt
+                .as_ref()
+                .expect("VersionSet::new_internal: Options.env is None")
+                .clone();
+            Box::new(EnvWrapper::new(env_rc))
+        };
 
-impl GetOptionsPtr for VersionSet {
-    fn options(&self) -> *const Options {
-        &self.options_ as *const Options
+        let icmp_copy: InternalKeyComparator =
+            unsafe { InternalKeyComparator::new((*cmp).user_comparator()) };
+
+        let dummy_files: [Vec<*mut FileMetaData>; NUM_LEVELS] = core::array::from_fn(|_| Vec::new());
+
+        let compact_pointer_init: [String; NUM_LEVELS] = core::array::from_fn(|_| String::new());
+
+        let dummy_versions = VersionBuilder::default()
+            .vset(Self::null_versionset_interface_ptr())
+            .next(core::ptr::null_mut())
+            .prev(core::ptr::null_mut())
+            .refs(0)
+            .files(dummy_files)
+            .file_to_compact(core::ptr::null_mut())
+            .file_to_compact_level(-1)
+            .compaction_score(-1.0)
+            .compaction_level(-1)
+            .build()
+            .unwrap();
+
+        let mut vset: VersionSet = VersionSetStateBuilder::default()
+            .env(env_box)
+            .dbname(dbname.clone())
+            .options(options)
+            .table_cache(table_cache as *const TableCache)
+            .icmp(icmp_copy)
+            .next_file_number(2)
+            .manifest_file_number(0)
+            .last_sequence(0)
+            .log_number(0)
+            .prev_log_number(0)
+            .descriptor_file(Self::null_writable_file_ptr())
+            .descriptor_log(core::ptr::null_mut())
+            .dummy_versions(dummy_versions)
+            .current(core::ptr::null_mut())
+            .compact_pointer(compact_pointer_init)
+            .build()
+            .unwrap();
+
+        {
+            let vset_iface_ptr: *mut dyn VersionSetInterface =
+                (&mut vset as &mut dyn VersionSetInterface) as *mut dyn VersionSetInterface;
+
+            let dummy_ptr: *mut Version = vset.dummy_versions_mut() as *mut Version;
+
+            unsafe {
+                (*dummy_ptr).set_next(dummy_ptr);
+                (*dummy_ptr).set_prev(dummy_ptr);
+            }
+
+            let initial_files: [Vec<*mut FileMetaData>; NUM_LEVELS] = core::array::from_fn(|_| Vec::new());
+
+            let mut initial_v = Box::new(
+                VersionBuilder::default()
+                    .vset(vset_iface_ptr)
+                    .next(core::ptr::null_mut())
+                    .prev(core::ptr::null_mut())
+                    .refs(0)
+                    .files(initial_files)
+                    .file_to_compact(core::ptr::null_mut())
+                    .file_to_compact_level(-1)
+                    .compaction_score(-1.0)
+                    .compaction_level(-1)
+                    .build()
+                    .unwrap(),
+            );
+
+            assert!(
+                *initial_v.refs() == 0,
+                "VersionSet::new_internal: initial version refs must be 0"
+            );
+
+            let v_ptr: *mut Version = &mut *initial_v;
+
+            vset.set_current(v_ptr);
+            initial_v.ref_();
+
+            initial_v.set_prev(dummy_ptr);
+            initial_v.set_next(dummy_ptr);
+
+            unsafe {
+                (*dummy_ptr).set_next(v_ptr);
+                (*dummy_ptr).set_prev(v_ptr);
+            }
+
+            let _leaked: *mut Version = Box::into_raw(initial_v);
+            let _ = _leaked;
+        }
+
+        vset
     }
 }
 
@@ -76,183 +182,79 @@ impl VersionSetInterface for VersionSet {}
 impl VersionSetVersionInterface for VersionSet {}
 impl CompactionInterface for VersionSet {}
 
-impl Into<Version> for *mut VersionSet {
+#[cfg(test)]
+mod version_set_exhaustive_test_suite {
+    use super::*;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use tracing::{debug, error, info, trace, warn};
 
-    fn into(self) -> Version {
-    
-        todo!();
-        /*
-        : vset(vset),
-        : next(this),
-        : prev(this),
-        : refs(0),
-        : file_to_compact(nullptr),
-        : file_to_compact_level(-1),
-        : compaction_score(-1),
-        : compaction_level(-1),
+    fn make_unique_temp_db_dir(prefix: &str) -> PathBuf {
+        let pid = std::process::id();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
 
-        
-        */
+        let mut p = std::env::temp_dir();
+        p.push(format!("{prefix}_{pid}_{nanos}"));
+        p
     }
-}
 
-impl CurrentVersion for VersionSet {
-
-    /**
-      | Return the current version.
-      |
-      */
-    fn current(&self) -> *mut Version {
-        
-        todo!();
-        /*
-            return current_;
-        */
-    }
-}
-
-impl ManifestFileNumber for VersionSet {
-
-    /**
-      | Return the current manifest file number
-      |
-      */
-    fn manifest_file_number(&self) -> u64 {
-        
-        todo!();
-        /*
-            return manifest_file_number_;
-        */
-    }
-}
-
-impl NewFileNumber for VersionSet {
-
-    /**
-      | Allocate and return a new file number
-      |
-      */
-    fn new_file_number(&mut self) -> u64 {
-        
-        todo!();
-        /*
-            return next_file_number_++;
-        */
-    }
-}
-
-impl ReuseFileNumber for VersionSet {
-
-    /**
-      | Arrange to reuse "file_number" unless a newer
-      | file number has already been allocated.
-      |
-      | REQUIRES: "file_number" was returned by
-      | a call to NewFileNumber().
-      */
-    fn reuse_file_number(&mut self, file_number: u64)  {
-        
-        todo!();
-        /*
-            if (next_file_number_ == file_number + 1) {
-          next_file_number_ = file_number;
+    fn remove_dir_all_best_effort(dir: &Path) {
+        match std::fs::remove_dir_all(dir) {
+            Ok(()) => trace!(dir = %dir.display(), "removed temp db dir"),
+            Err(e) => warn!(dir = %dir.display(), error = ?e, "failed to remove temp db dir (best effort)"),
         }
-        */
     }
-}
 
-impl LastSequenceNumber for VersionSet {
-
-    /**
-      | Return the last sequence number.
-      |
-      */
-    fn last_sequence(&self) -> u64 {
-        
-        todo!();
-        /*
-            return last_sequence_;
-        */
+    fn make_internal_key_comparator_from_options(options: &Options) -> InternalKeyComparator {
+        let ucmp_ptr: *const dyn SliceComparator =
+            options.comparator().as_ref() as *const dyn SliceComparator;
+        InternalKeyComparator::new(ucmp_ptr)
     }
-}
 
-impl SetLastSequenceNumber for VersionSet {
+    #[traced_test]
+    fn versionset_new_initializes_expected_state_invariants() {
+        let dir = make_unique_temp_db_dir("versionset_new_invariants");
+        std::fs::create_dir_all(&dir).unwrap();
+        let dbname = dir.to_string_lossy().to_string();
 
-    /**
-      | Set the last sequence number to s.
-      |
-      */
-    fn set_last_sequence(&mut self, s: u64)  {
-        
-        todo!();
-        /*
-            assert(s >= last_sequence_);
-        last_sequence_ = s;
-        */
-    }
-}
+        let env = PosixEnv::shared();
+        let options = Box::new(Options::with_env(env));
+        let icmp = Box::new(make_internal_key_comparator_from_options(options.as_ref()));
+        let mut table_cache = Box::new(TableCache::new(&dbname, options.as_ref(), 4));
 
-impl GetCurrentLogFileNumber for VersionSet {
+        let vs = VersionSet::new(
+            &dbname,
+            options.as_ref(),
+            table_cache.as_mut() as *mut TableCache,
+            icmp.as_ref() as *const InternalKeyComparator,
+        );
 
-    /**
-      | Return the current log file number.
-      |
-      */
-    fn log_number(&self) -> u64 {
-        
-        todo!();
-        /*
-            return log_number_;
-        */
-    }
-}
+        debug!(
+            dbname = %vs.dbname(),
+            next_file_number = vs.next_file_number(),
+            manifest_file_number = vs.manifest_file_number(),
+            last_sequence = vs.last_sequence(),
+            log_number = vs.log_number(),
+            prev_log_number = vs.prev_log_number(),
+            current_ptr = %format!("{:p}", vs.current()),
+            "constructed versionset state"
+        );
 
-impl GetPrevLogFileNumber for VersionSet {
+        assert_eq!(vs.dbname().as_str(), dbname.as_str(), "dbname must be stored");
+        assert!(!vs.options().is_null(), "options pointer must not be null");
+        assert!(!vs.table_cache().is_null(), "table_cache pointer must not be null");
 
-    /**
-      | Return the log file number for the log
-      | file that is currently being compacted,
-      | or zero if there is no such log file.
-      |
-      */
-    fn prev_log_number(&self) -> u64 {
-        
-        todo!();
-        /*
-            return prev_log_number_;
-        */
-    }
-}
+        assert_eq!(vs.next_file_number(), 2, "default next_file_number must be 2");
+        assert_eq!(vs.manifest_file_number(), 0, "default manifest_file_number must be 0");
+        assert_eq!(vs.last_sequence(), 0, "default last_sequence must be 0");
+        assert_eq!(vs.log_number(), 0, "default log_number must be 0");
+        assert_eq!(vs.prev_log_number(), 0, "default prev_log_number must be 0");
 
-impl NeedsCompaction for VersionSet {
+        assert!(!vs.current().is_null(), "current version must be initialized in new_internal");
 
-    /**
-      | Returns true iff some level needs a compaction.
-      |
-      */
-    fn needs_compaction(&self) -> bool {
-        
-        todo!();
-        /*
-            Version* v = current_;
-        return (v->compaction_score_ >= 1) || (v->file_to_compact_ != nullptr);
-        */
-    }
-}
-    
-impl MarkFileNumberUsed for VersionSet {
-
-    /**
-      | Mark the specified file number as used.
-      |
-      */
-    fn mark_file_number_used(&mut self, number: u64)  {
-        
-        todo!();
-        /*
-            if (next_file_number_ <= number) {
-        next_file_number_ = number + 1;
-      }
-        */
+        remove_dir_all_best_effort(&dir);
     }
 }

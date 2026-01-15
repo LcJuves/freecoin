@@ -1,14 +1,17 @@
 // ---------------- [ File: bitcoinleveldb-dbimpl/src/get_snapshot.rs ]
 crate::ix!();
 
-impl GetSnapshot for DBImpl {
+impl DBGetSnapshot for DBImpl {
 
-    fn get_snapshot(&mut self) -> Box<dyn Snapshot> {
-        
-        todo!();
+    fn get_snapshot(&mut self) -> Box<dyn Snapshot> { 
+        todo!(); 
         /*
-            MutexLock l(&mutex_);
-      return snapshots_.New(versions_->LastSequence());
-        */
+        self.mutex.lock();
+        let snap = self
+            .snapshots
+            .new(unsafe { (*self.versions).last_sequence() });
+        self.mutex.unlock();
+        snap
+                                                          */
     }
 }

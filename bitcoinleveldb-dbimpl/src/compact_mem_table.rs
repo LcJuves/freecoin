@@ -2,49 +2,53 @@
 crate::ix!();
 
 impl DBImpl {
-    
-    /**
-      | Compact the in-memory write buffer to disk.
-      | Switches to a new log-file/memtable and
-      | writes a new descriptor iff successful.
-      |
-      | Errors are recorded in bg_error_.
-      */
-    #[EXCLUSIVE_LOCKS_REQUIRED(mutex_)]
-    pub fn compact_mem_table(&mut self)  {
-        
-        todo!();
-        /*
-            mutex_.AssertHeld();
-      assert(imm_ != nullptr);
+    /// Compact the in-memory write buffer to disk.
+    ///
+    /// Switches to a new log-file/memtable and writes a new descriptor iff successful.
+    ///
+    /// Errors are recorded in bg_error.
+    #[EXCLUSIVE_LOCKS_REQUIRED(mutex)]
+    pub fn compact_mem_table(&mut self) {
+        self.mutex.assert_held();
+        assert!(!self.imm.is_null());
 
-      // Save the contents of the memtable as a new Table
-      VersionEdit edit;
-      Version* base = versions_->current();
-      base->Ref();
-      Status s = WriteLevel0Table(imm_, &edit, base);
-      base->Unref();
+        // Save the contents of the memtable as a new Table
+        let mut edit: VersionEdit = Default::default();
+        let base: *mut Version = unsafe { (*self.versions).current() };
+        unsafe {
+            (*base).ref_();
+        }
 
-      if (s.ok() && shutting_down_.load(std::memory_order_acquire)) {
-        s = Status::IOError("Deleting DB during memtable compaction");
-      }
+        let mut s: Status = self.write_level_0table(self.imm, &mut edit, base);
 
-      // Replace immutable memtable with the generated Table
-      if (s.ok()) {
-        edit.SetPrevLogNumber(0);
-        edit.SetLogNumber(logfile_number_);  // Earlier logs no longer needed
-        s = versions_->LogAndApply(&edit, &mutex_);
-      }
+        unsafe {
+            (*base).unref();
+        }
 
-      if (s.ok()) {
-        // Commit to the new state
-        imm_->Unref();
-        imm_ = nullptr;
-        has_imm_.store(false, std::memory_order_release);
-        DeleteObsoleteFiles();
-      } else {
-        RecordBackgroundError(s);
-      }
-        */
+        if s.is_ok() && self.shutting_down.load(core::sync::atomic::Ordering::Acquire) {
+            let msg = Slice::from_str("Deleting DB during memtable compaction");
+            s = Status::io_error(&msg, None);
+        }
+
+        // Replace immutable memtable with the generated Table
+        if s.is_ok() {
+            edit.set_prev_log_number(0);
+
+            // Earlier logs no longer needed
+            edit.set_log_number(self.logfile_number);
+            s = unsafe { (*self.versions).log_and_apply(&mut edit, &mut self.mutex) };
+        }
+
+        if s.is_ok() {
+            // Commit to the new state
+            unsafe {
+                (*self.imm).unref();
+            }
+            self.imm = core::ptr::null_mut();
+            self.has_imm.store(false, core::sync::atomic::Ordering::Release);
+            self.delete_obsolete_files();
+        } else {
+            self.record_background_error(&s);
+        }
     }
 }

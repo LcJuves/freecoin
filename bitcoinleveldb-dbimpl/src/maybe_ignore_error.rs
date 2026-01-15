@@ -2,17 +2,15 @@
 crate::ix!();
 
 impl DBImpl {
-    
-    pub fn maybe_ignore_error(&self, s: *mut Status)  {
-        
-        todo!();
-        /*
-          if (s->ok() || options_.paranoid_checks) {
-            // No change needed
-          } else {
-            Log(options_.info_log, "Ignoring error %s", s->ToString().c_str());
-            *s = Status::OK();
-          }
-        */
+
+    pub fn maybe_ignore_error(&self, s: *mut Status) {
+        unsafe {
+            if (*s).is_ok() || *self.options.paranoid_checks() {
+                // No change needed
+            } else {
+                tracing::warn!(status = %(*s).to_string(), "Ignoring error");
+                *s = Status::ok();
+            }
+        }
     }
 }

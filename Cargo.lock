@@ -424,6 +424,7 @@ checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
 name = "bitcoin-addr"
 version = "0.1.21"
 dependencies = [
+ "bitcoin-bitstream",
  "bitcoin-cfg",
  "bitcoin-derive",
  "bitcoin-imports",
@@ -844,6 +845,9 @@ version = "0.1.19"
 dependencies = [
  "bitcoin-derive",
  "bitcoin-imports",
+ "bitcoin-syscall",
+ "bitcoin-system",
+ "tracing",
 ]
 
 [[package]]
@@ -2188,12 +2192,14 @@ dependencies = [
  "bitcoin-cfg",
  "bitcoin-derive",
  "bitcoin-imports",
+ "bitcoin-syscall",
  "lazy_static",
  "libc",
  "multimap",
  "parking_lot 0.12.5",
  "static_assertions",
  "time-point",
+ "tracing",
 ]
 
 [[package]]
@@ -2282,6 +2288,7 @@ dependencies = [
 name = "bitcoin-service"
 version = "0.1.21"
 dependencies = [
+ "bitcoin-bitstream",
  "bitcoin-cfg",
  "bitcoin-derive",
  "bitcoin-imports",
@@ -3046,10 +3053,15 @@ dependencies = [
  "bitcoin-cfg",
  "bitcoin-derive",
  "bitcoin-imports",
+ "bitcoinleveldb-coding",
+ "bitcoinleveldb-iterator",
+ "bitcoinleveldb-iteratorinner",
  "bitcoinleveldb-key",
  "bitcoinleveldb-memtable",
  "bitcoinleveldb-slice",
  "bitcoinleveldb-status",
+ "derive_builder",
+ "tracing",
 ]
 
 [[package]]
@@ -3301,6 +3313,9 @@ name = "bitcoinleveldb-compactionstats"
 version = "0.1.0"
 dependencies = [
  "bitcoin-imports",
+ "derive_builder",
+ "getset",
+ "tracing",
 ]
 
 [[package]]
@@ -3361,11 +3376,17 @@ name = "bitcoinleveldb-dbconstructor"
 version = "0.1.0"
 dependencies = [
  "bitcoin-imports",
+ "bitcoinleveldb-batch",
+ "bitcoinleveldb-blockconstructor",
  "bitcoinleveldb-comparator",
+ "bitcoinleveldb-dbimpl",
  "bitcoinleveldb-dbinterface",
  "bitcoinleveldb-iterator",
+ "bitcoinleveldb-iteratorinner",
  "bitcoinleveldb-options",
+ "bitcoinleveldb-status",
  "bitcoinleveldb-tableconstructor",
+ "tracing",
 ]
 
 [[package]]
@@ -3374,41 +3395,39 @@ version = "0.1.0"
 dependencies = [
  "bitcoin-derive",
  "bitcoin-imports",
+ "bitcoinleveldb-batch",
  "bitcoinleveldb-cache",
+ "bitcoinleveldb-cfg",
  "bitcoinleveldb-compaction",
  "bitcoinleveldb-compactionstats",
- "bitcoinleveldb-dbimplinner",
+ "bitcoinleveldb-comparator",
  "bitcoinleveldb-dbimplwriter",
  "bitcoinleveldb-dbinterface",
+ "bitcoinleveldb-dbiterstate",
  "bitcoinleveldb-env",
  "bitcoinleveldb-file",
+ "bitcoinleveldb-filter",
  "bitcoinleveldb-iterator",
+ "bitcoinleveldb-iteratorinner",
  "bitcoinleveldb-key",
+ "bitcoinleveldb-log",
+ "bitcoinleveldb-logreader",
  "bitcoinleveldb-logwriter",
  "bitcoinleveldb-memtable",
+ "bitcoinleveldb-merger",
  "bitcoinleveldb-options",
  "bitcoinleveldb-slice",
  "bitcoinleveldb-snapshot",
  "bitcoinleveldb-status",
+ "bitcoinleveldb-tablebuilder",
  "bitcoinleveldb-tablecache",
  "bitcoinleveldb-version",
  "bitcoinleveldb-versionedit",
- "bitcoinleveldb-writebatch",
-]
-
-[[package]]
-name = "bitcoinleveldb-dbimplinner"
-version = "0.1.0"
-dependencies = [
- "bitcoin-imports",
- "bitcoinleveldb-compaction",
- "bitcoinleveldb-compactionstats",
- "bitcoinleveldb-dbimplwriter",
- "bitcoinleveldb-memtable",
- "bitcoinleveldb-snapshot",
- "bitcoinleveldb-status",
  "bitcoinleveldb-versionset",
+ "bitcoinleveldb-versionsetinterface",
  "bitcoinleveldb-writebatch",
+ "disable_macro",
+ "tracing",
 ]
 
 [[package]]
@@ -3416,8 +3435,12 @@ name = "bitcoinleveldb-dbimplwriter"
 version = "0.1.0"
 dependencies = [
  "bitcoin-imports",
+ "bitcoinleveldb-batch",
  "bitcoinleveldb-status",
  "bitcoinleveldb-writebatch",
+ "derive_builder",
+ "getset",
+ "tracing",
 ]
 
 [[package]]
@@ -3425,12 +3448,17 @@ name = "bitcoinleveldb-dbinterface"
 version = "0.1.0"
 dependencies = [
  "bitcoin-imports",
+ "bitcoinleveldb-batch",
+ "bitcoinleveldb-compat",
  "bitcoinleveldb-iterator",
+ "bitcoinleveldb-iteratorinner",
  "bitcoinleveldb-options",
  "bitcoinleveldb-slice",
  "bitcoinleveldb-snapshot",
  "bitcoinleveldb-status",
  "bitcoinleveldb-writebatch",
+ "export-magic",
+ "tracing",
 ]
 
 [[package]]
@@ -3448,13 +3476,21 @@ dependencies = [
 [[package]]
 name = "bitcoinleveldb-dbiterstate"
 version = "0.1.0"
+dependencies = [
+ "bitcoin-imports",
+ "bitcoinleveldb-memtable",
+ "bitcoinleveldb-version",
+ "tracing",
+]
 
 [[package]]
 name = "bitcoinleveldb-dbtest"
 version = "0.1.0"
 dependencies = [
  "bitcoin-imports",
+ "bitcoinleveldb-dbimpl",
  "bitcoinleveldb-dbinterface",
+ "bitcoinleveldb-filter",
  "bitcoinleveldb-iterator",
  "bitcoinleveldb-options",
  "bitcoinleveldb-rand",
@@ -3474,10 +3510,17 @@ dependencies = [
  "bitcoinleveldb-batch",
  "bitcoinleveldb-env",
  "bitcoinleveldb-file",
+ "bitcoinleveldb-iteratorinner",
  "bitcoinleveldb-key",
  "bitcoinleveldb-log",
+ "bitcoinleveldb-logreader",
+ "bitcoinleveldb-options",
+ "bitcoinleveldb-posixenv",
  "bitcoinleveldb-slice",
  "bitcoinleveldb-status",
+ "bitcoinleveldb-table",
+ "bitcoinleveldb-versionedit",
+ "tracing",
 ]
 
 [[package]]
@@ -3594,7 +3637,9 @@ name = "bitcoinleveldb-harness"
 version = "0.1.0"
 dependencies = [
  "bitcoin-imports",
+ "bitcoinleveldb-blockconstructor",
  "bitcoinleveldb-dbinterface",
+ "bitcoinleveldb-dbtest",
  "bitcoinleveldb-iterator",
  "bitcoinleveldb-options",
  "bitcoinleveldb-rand",
@@ -3854,10 +3899,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "bitcoinleveldb-mockversionset"
+version = "0.1.0"
+dependencies = [
+ "bitcoin-imports",
+ "bitcoinleveldb-comparator",
+ "bitcoinleveldb-file",
+ "bitcoinleveldb-key",
+ "bitcoinleveldb-options",
+ "bitcoinleveldb-status",
+ "bitcoinleveldb-tablecache",
+ "bitcoinleveldb-versionsetinterface",
+]
+
+[[package]]
 name = "bitcoinleveldb-modeldb"
 version = "0.1.0"
 dependencies = [
  "bitcoin-imports",
+ "bitcoinleveldb-batch",
  "bitcoinleveldb-dbinterface",
  "bitcoinleveldb-iterator",
  "bitcoinleveldb-options",
@@ -3876,12 +3936,16 @@ dependencies = [
  "bitcoinleveldb-cache",
  "bitcoinleveldb-comparator",
  "bitcoinleveldb-env",
+ "bitcoinleveldb-file",
  "bitcoinleveldb-filter",
  "bitcoinleveldb-key",
  "bitcoinleveldb-log",
  "bitcoinleveldb-slice",
  "bitcoinleveldb-snapshot",
+ "bitcoinleveldb-status",
  "derive_builder",
+ "disable_macro",
+ "tracing",
 ]
 
 [[package]]
@@ -4060,16 +4124,28 @@ dependencies = [
  "bitcoin-cfg",
  "bitcoin-derive",
  "bitcoin-imports",
+ "bitcoinleveldb-batch",
  "bitcoinleveldb-cache",
  "bitcoinleveldb-comparator",
  "bitcoinleveldb-env",
  "bitcoinleveldb-file",
  "bitcoinleveldb-filter",
+ "bitcoinleveldb-iterator",
+ "bitcoinleveldb-iteratorinner",
  "bitcoinleveldb-key",
+ "bitcoinleveldb-log",
+ "bitcoinleveldb-logreader",
+ "bitcoinleveldb-memtable",
  "bitcoinleveldb-options",
+ "bitcoinleveldb-posixenv",
+ "bitcoinleveldb-slice",
  "bitcoinleveldb-status",
  "bitcoinleveldb-table",
+ "bitcoinleveldb-tablebuilder",
+ "bitcoinleveldb-tablecache",
  "bitcoinleveldb-versionedit",
+ "bitcoinleveldb-writebatch",
+ "tracing",
 ]
 
 [[package]]
@@ -4134,7 +4210,10 @@ dependencies = [
  "bitcoin-imports",
  "bitcoinleveldb-env",
  "bitcoinleveldb-file",
+ "bitcoinleveldb-logtools",
+ "bitcoinleveldb-slice",
  "bitcoinleveldb-status",
+ "tracing",
 ]
 
 [[package]]
@@ -4328,7 +4407,12 @@ version = "0.1.0"
 dependencies = [
  "bitcoin-imports",
  "bitcoinleveldb-env",
+ "bitcoinleveldb-file",
+ "bitcoinleveldb-log",
+ "bitcoinleveldb-slice",
  "bitcoinleveldb-status",
+ "traced-test",
+ "tracing",
 ]
 
 [[package]]
@@ -4362,6 +4446,7 @@ dependencies = [
  "bitcoinleveldb-iteratorinner",
  "bitcoinleveldb-key",
  "bitcoinleveldb-log",
+ "bitcoinleveldb-mockversionset",
  "bitcoinleveldb-options",
  "bitcoinleveldb-slice",
  "bitcoinleveldb-status",
@@ -4412,28 +4497,32 @@ version = "0.1.0"
 dependencies = [
  "bitcoin-derive",
  "bitcoin-imports",
+ "bitcoinleveldb-cfg",
  "bitcoinleveldb-compaction",
+ "bitcoinleveldb-comparator",
+ "bitcoinleveldb-duplex",
  "bitcoinleveldb-env",
  "bitcoinleveldb-file",
  "bitcoinleveldb-iterator",
+ "bitcoinleveldb-iteratorinner",
  "bitcoinleveldb-key",
+ "bitcoinleveldb-logreader",
  "bitcoinleveldb-logwriter",
+ "bitcoinleveldb-merger",
  "bitcoinleveldb-options",
+ "bitcoinleveldb-posixenv",
+ "bitcoinleveldb-slice",
+ "bitcoinleveldb-snapshot",
  "bitcoinleveldb-status",
+ "bitcoinleveldb-table",
  "bitcoinleveldb-tablecache",
  "bitcoinleveldb-version",
  "bitcoinleveldb-versionedit",
  "bitcoinleveldb-versionsetinterface",
-]
-
-[[package]]
-name = "bitcoinleveldb-versionsetbuilder"
-version = "0.1.0"
-dependencies = [
- "bitcoin-imports",
- "bitcoinleveldb-file",
- "bitcoinleveldb-version",
- "bitcoinleveldb-versionset",
+ "bitcoinleveldb-versionsetutil",
+ "derive_builder",
+ "disable_macro",
+ "tracing",
 ]
 
 [[package]]
@@ -4736,6 +4825,102 @@ name = "bitcoinsecp256k1-ec"
 version = "0.1.20"
 dependencies = [
  "bitcoin-cfg",
+ "bitcoinsecp256k1-eccontext",
+ "bitcoinsecp256k1-ecdh",
+ "bitcoinsecp256k1-ecdsa",
+ "bitcoinsecp256k1-ecdsasignature",
+ "bitcoinsecp256k1-eckey",
+ "bitcoinsecp256k1-ecmult",
+ "bitcoinsecp256k1-ecmultconst",
+ "bitcoinsecp256k1-ecmultgen",
+]
+
+[[package]]
+name = "bitcoinsecp256k1-eccontext"
+version = "0.1.0"
+dependencies = [
+ "bitcoin-cfg",
+ "bitcoin-derive",
+ "bitcoin-imports",
+ "bitcoin-key",
+ "bitcoinsecp256k1-ecmult",
+ "bitcoinsecp256k1-ecmultgen",
+ "bitcoinsecp256k1-field",
+ "bitcoinsecp256k1-group",
+ "bitcoinsecp256k1-scalar",
+ "bitcoinsecp256k1-scratch",
+]
+
+[[package]]
+name = "bitcoinsecp256k1-ecdh"
+version = "0.1.0"
+dependencies = [
+ "bitcoin-cfg",
+ "bitcoin-derive",
+ "bitcoin-imports",
+ "bitcoin-key",
+ "bitcoinsecp256k1-eccontext",
+ "bitcoinsecp256k1-field",
+ "bitcoinsecp256k1-group",
+ "bitcoinsecp256k1-scalar",
+ "bitcoinsecp256k1-scratch",
+]
+
+[[package]]
+name = "bitcoinsecp256k1-ecdsa"
+version = "0.1.0"
+dependencies = [
+ "bitcoin-cfg",
+ "bitcoin-derive",
+ "bitcoin-imports",
+ "bitcoin-key",
+ "bitcoinsecp256k1-eccontext",
+ "bitcoinsecp256k1-ecdsasignature",
+ "bitcoinsecp256k1-ecmult",
+ "bitcoinsecp256k1-ecmultgen",
+ "bitcoinsecp256k1-field",
+ "bitcoinsecp256k1-group",
+ "bitcoinsecp256k1-scalar",
+ "bitcoinsecp256k1-scratch",
+]
+
+[[package]]
+name = "bitcoinsecp256k1-ecdsasignature"
+version = "0.1.0"
+dependencies = [
+ "bitcoin-cfg",
+ "bitcoin-derive",
+ "bitcoin-imports",
+ "bitcoin-key",
+ "bitcoinsecp256k1-eccontext",
+ "bitcoinsecp256k1-field",
+ "bitcoinsecp256k1-group",
+ "bitcoinsecp256k1-scalar",
+ "bitcoinsecp256k1-scratch",
+]
+
+[[package]]
+name = "bitcoinsecp256k1-eckey"
+version = "0.1.0"
+dependencies = [
+ "bitcoin-cfg",
+ "bitcoin-derive",
+ "bitcoin-imports",
+ "bitcoin-key",
+ "bitcoinsecp256k1-eccontext",
+ "bitcoinsecp256k1-ecmult",
+ "bitcoinsecp256k1-ecmultgen",
+ "bitcoinsecp256k1-field",
+ "bitcoinsecp256k1-group",
+ "bitcoinsecp256k1-scalar",
+ "bitcoinsecp256k1-scratch",
+]
+
+[[package]]
+name = "bitcoinsecp256k1-ecmult"
+version = "0.1.0"
+dependencies = [
+ "bitcoin-cfg",
  "bitcoin-derive",
  "bitcoin-imports",
  "bitcoin-key",
@@ -4743,6 +4928,67 @@ dependencies = [
  "bitcoinsecp256k1-group",
  "bitcoinsecp256k1-scalar",
  "bitcoinsecp256k1-scratch",
+ "tracing",
+]
+
+[[package]]
+name = "bitcoinsecp256k1-ecmultconst"
+version = "0.1.0"
+dependencies = [
+ "bitcoin-cfg",
+ "bitcoin-derive",
+ "bitcoin-imports",
+ "bitcoin-key",
+ "bitcoinsecp256k1-ecmult",
+ "bitcoinsecp256k1-field",
+ "bitcoinsecp256k1-group",
+ "bitcoinsecp256k1-scalar",
+ "bitcoinsecp256k1-scratch",
+ "tracing",
+]
+
+[[package]]
+name = "bitcoinsecp256k1-ecmultgen"
+version = "0.1.0"
+dependencies = [
+ "bitcoin-cfg",
+ "bitcoin-derive",
+ "bitcoin-hmac-sha256",
+ "bitcoin-imports",
+ "bitcoin-key",
+ "bitcoinsecp256k1-field",
+ "bitcoinsecp256k1-group",
+ "bitcoinsecp256k1-scalar",
+ "bitcoinsecp256k1-scratch",
+ "tracing",
+]
+
+[[package]]
+name = "bitcoinsecp256k1-fe10x26"
+version = "0.1.0"
+dependencies = [
+ "bitcoin-cfg",
+ "bitcoin-derive",
+ "bitcoin-imports",
+ "bitcoinsecp256k1-modinv",
+ "bitcoinsecp256k1-scratch",
+ "derive_builder",
+ "getset",
+ "tracing",
+]
+
+[[package]]
+name = "bitcoinsecp256k1-fe5x52"
+version = "0.1.0"
+dependencies = [
+ "bitcoin-cfg",
+ "bitcoin-derive",
+ "bitcoin-imports",
+ "bitcoinsecp256k1-modinv64",
+ "bitcoinsecp256k1-scratch",
+ "derive_builder",
+ "getset",
+ "tracing",
 ]
 
 [[package]]
@@ -4752,7 +4998,11 @@ dependencies = [
  "bitcoin-cfg",
  "bitcoin-derive",
  "bitcoin-imports",
+ "bitcoinsecp256k1-fe10x26",
+ "bitcoinsecp256k1-fe5x52",
  "bitcoinsecp256k1-modinv",
+ "bitcoinsecp256k1-scratch",
+ "tracing",
 ]
 
 [[package]]
@@ -4763,6 +5013,8 @@ dependencies = [
  "bitcoin-derive",
  "bitcoin-imports",
  "bitcoinsecp256k1-field",
+ "bitcoinsecp256k1-scratch",
+ "tracing",
 ]
 
 [[package]]
@@ -4783,9 +5035,35 @@ dependencies = [
 name = "bitcoinsecp256k1-modinv"
 version = "0.1.19"
 dependencies = [
+ "bitcoin-imports",
+ "bitcoinsecp256k1-modinv32",
+ "bitcoinsecp256k1-modinv64",
+]
+
+[[package]]
+name = "bitcoinsecp256k1-modinv32"
+version = "0.1.19"
+dependencies = [
  "bitcoin-cfg",
  "bitcoin-derive",
  "bitcoin-imports",
+ "bitcoinsecp256k1-scratch",
+ "derive_builder",
+ "getset",
+ "tracing",
+]
+
+[[package]]
+name = "bitcoinsecp256k1-modinv64"
+version = "0.1.19"
+dependencies = [
+ "bitcoin-cfg",
+ "bitcoin-derive",
+ "bitcoin-imports",
+ "bitcoinsecp256k1-scratch",
+ "derive_builder",
+ "getset",
+ "tracing",
 ]
 
 [[package]]
@@ -4821,6 +5099,10 @@ dependencies = [
  "bitcoin-derive",
  "bitcoin-imports",
  "bitcoinsecp256k1-modinv",
+ "bitcoinsecp256k1-scratch",
+ "derive_builder",
+ "getset",
+ "tracing",
 ]
 
 [[package]]
@@ -4844,6 +5126,9 @@ dependencies = [
  "bitcoin-cfg",
  "bitcoin-derive",
  "bitcoin-imports",
+ "derive_builder",
+ "getset",
+ "tracing",
 ]
 
 [[package]]

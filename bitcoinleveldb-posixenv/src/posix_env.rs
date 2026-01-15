@@ -57,6 +57,29 @@ pub struct PosixEnv {
     file_lock_registry: Mutex<std::collections::HashMap<usize, PosixEnvFileLockInfo>>,
 }
 
+/**
+  | Return a default environment suitable for the
+  | current operating system.
+  |
+  | This is the Rust analogue of leveldb::Env::Default().
+  | The returned Env is owned by the library and must
+  | not be manually deleted by callers.
+  */
+pub fn posix_default_env() -> Rc<RefCell<dyn Env>> {
+    // NOTE:
+    // The real implementation is OS-specific and provided
+    // elsewhere in the C++ code (env_posix, env_windows, ...).
+    // Here we leave a stub so that the translation compiles;
+    // platform-specific wiring should replace this.
+
+    /*
+    static PosixDefaultEnv env_container;
+    return env_container.env();
+    */
+
+    PosixEnv::shared()
+}
+
 impl Env for PosixEnv {
 
 }
@@ -90,6 +113,38 @@ impl Default for PosixEnv {
     }
 }
 
+impl PosixEnv {
+    pub fn shared() -> Rc<RefCell<dyn Env>> {
+        trace!("PosixEnv::shared: acquiring thread-local singleton");
+
+        thread_local! {
+            static POSIX_ENV_SINGLETON_PTR: *const Rc<RefCell<dyn Env>> = {
+                trace!("PosixEnv::shared: initializing thread-local singleton instance");
+
+                let env_rc: Rc<RefCell<dyn Env>> = Rc::new(RefCell::new(PosixEnv::default()));
+
+                // Leak the Rc so that it is never dropped; this prevents PosixEnv::drop
+                // from aborting the process during test teardown (mirrors C++ singleton lifetime).
+                let leaked: *const Rc<RefCell<dyn Env>> = Box::into_raw(Box::new(env_rc));
+
+                debug!(
+                    leaked_ptr = ?leaked,
+                    "PosixEnv::shared: leaked thread-local singleton Rc"
+                );
+
+                leaked
+            };
+        }
+
+        POSIX_ENV_SINGLETON_PTR.with(|ptr| unsafe {
+            debug!(
+                leaked_ptr = ?*ptr,
+                "PosixEnv::shared: cloning Rc from leaked singleton"
+            );
+            (**ptr).clone()
+        })
+    }
+}
 impl Drop for PosixEnv {
 
     fn drop(&mut self) {

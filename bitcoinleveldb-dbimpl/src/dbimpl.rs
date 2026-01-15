@@ -9,26 +9,26 @@ pub struct DBImpl {
       | Constant after construction
       |
       */
-    env:                    Box<dyn Env>,
+    pub env:                    Box<dyn Env>,
 
-    internal_comparator:    InternalKeyComparator,
-    internal_filter_policy: InternalFilterPolicy,
-
-    /**
-      | options_.comparator == &internal_comparator_
-      |
-      */
-    options:                Options,
-
-    owns_info_log:          bool,
-    owns_cache:             bool,
-    dbname:                 String,
+    pub internal_comparator:    InternalKeyComparator,
+    pub internal_filter_policy: InternalFilterPolicy,
 
     /**
-      | table_cache_ provides its own synchronization
+      | options.comparator == &internal_comparator
       |
       */
-    table_cache:            *const TableCache,
+    pub options:                Options,
+
+    pub owns_info_log:          bool,
+    pub owns_cache:             bool,
+    pub dbname:                 String,
+
+    /**
+      | table_cache provides its own synchronization
+      |
+      */
+    pub table_cache:            *const TableCache,
 
     /**
       | Lock over the persistent DB state.
@@ -36,26 +36,62 @@ pub struct DBImpl {
       | Non-null iff successfully acquired.
       |
       */
-    db_lock:                Rc<RefCell<dyn FileLock>>,
+    pub db_lock:                Rc<RefCell<dyn FileLock>>,
+
+    /// State below is protected by mutex
+    pub mutex:                  RawMutex,
+
+    //--------------------------------------------[mutex-guarded-fields]
+    pub background_work_finished_signal: Condvar,
+
+    /// Memtable being compacted
+    /// 
+    pub imm: *mut MemTable,
+
+    pub logfile_number: u64,
+
+    /// For sampling.
+    /// 
+    pub seed: u32,
+
+    /// Queue of writers.
+    /// 
+    pub writers: VecDeque<*mut DBImplWriter>,
+    pub tmp_batch: *mut WriteBatch,
+    pub snapshots: SnapshotList,
+
+    /// Set of table files to protect from deletion
+    /// because they are part of ongoing compactions.
+    /// 
+    pub pending_outputs: HashSet<u64>,
+
+    /// Has a background compaction been scheduled
+    /// or is running?
+    /// 
+    pub background_compaction_scheduled: bool,
+    pub manual_compaction: *mut ManualCompaction,
+    pub versions: *mut VersionSet,
+
+    /// Have we encountered a background error
+    /// in paranoid mode?
+    /// 
+    pub bg_error: Status,
+    pub stats: [CompactionStats; NUM_LEVELS],
+
+    //--------------------------------------------[marks-end-of-mutex-guarded-fields]
+
+    pub shutting_down:          AtomicBool,
+
+    pub mem:                    *mut MemTable,
 
     /**
-      | State below is protected by mutex_
+      | So bg thread can detect non-null imm
       |
       */
-    mutex:                  Mutex<DBImplInner>,
+    pub has_imm:                AtomicBool,
 
-    shutting_down:          AtomicBool,
-
-    mem:                    *mut MemTable,
-
-    /**
-      | So bg thread can detect non-null imm_
-      |
-      */
-    has_imm:                AtomicBool,
-
-    logfile:                Rc<RefCell<dyn WritableFile>>,
-    log:                    *mut LogWriter,
+    pub logfile:                Rc<RefCell<dyn WritableFile>>,
+    pub log:                    *mut LogWriter,
 }
 
 impl DB for DBImpl { }
