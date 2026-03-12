@@ -51,6 +51,7 @@ pub struct Version {
       | List of files per level
       |
       */
+    #[getset(skip)]
     files:                 [Vec<*mut FileMetaData>; NUM_LEVELS],
 
     /**
@@ -78,6 +79,10 @@ impl Version {
         self.vset
     }
 
+    pub fn set_vset(&mut self, vset: *mut dyn VersionSetInterface) {
+        self.vset = vset;
+    }
+
     pub fn num_files(&self, level: i32) -> i32 {
         trace!("Version::num_files: level={}", level);
         assert!(
@@ -93,6 +98,16 @@ impl Version {
             level, count
         );
         count
+    }
+
+    #[inline]
+    pub fn files(&self) -> &[Vec<*mut FileMetaData>; NUM_LEVELS] {
+        &self.files
+    }
+
+    #[inline]
+    pub fn files_mut(&mut self) -> &mut [Vec<*mut FileMetaData>; NUM_LEVELS] {
+        &mut self.files
     }
 }
 

@@ -41,3 +41,10 @@ x!{log_reporter}
 x!{open}
 x!{dbimpl_null_file_lock}
 x!{dbimpl_user_comparator_adapter}
+x!{background_call}
+
+#[cfg(test)]
+x!{test_hooks}
+
+#[cfg(test)]
+x!{rt_probe}

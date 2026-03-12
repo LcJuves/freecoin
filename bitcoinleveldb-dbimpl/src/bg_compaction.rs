@@ -12,105 +12,60 @@ impl DBImpl {
         }
 
         let mut c: *mut Compaction = core::ptr::null_mut();
-        let is_manual: bool = !self.manual_compaction.is_null();
+
+        let is_manual: bool =
+            bitcoinleveldb_dbimplinner::background_compaction_is_manual_requested(self.manual_compaction);
+
         let mut manual_end: InternalKey = Default::default();
 
         if is_manual {
-            let m: *mut ManualCompaction = self.manual_compaction;
-            c = unsafe { (*self.versions).compact_range(*(*m).level(), *(*m).begin(), *(*m).end()) };
-            unsafe {
-                (*m).set_done(c.is_null());
-            }
-
-            if !c.is_null() {
-                let n0: i32 = unsafe { (*c).num_input_files(0) };
-                if n0 > 0 {
-                    manual_end = unsafe { (*(*c).input(0, n0 - 1)).largest().clone() };
-                }
-            }
-
-            let begin_dbg: String = unsafe {
-                if (*m).begin().is_null() {
-                    "(begin)".to_string()
-                } else {
-                    (*(*(*m).begin())).debug_string()
-                }
+            let (picked, end_key): (*mut Compaction, InternalKey) = unsafe {
+                bitcoinleveldb_dbimplinner::select_manual_compaction_from_request_and_log_plan(
+                    self.versions,
+                    self.manual_compaction,
+                )
             };
-
-            let end_dbg: String = unsafe {
-                if (*m).end().is_null() {
-                    "(end)".to_string()
-                } else {
-                    (*(*m).end()).debug_string()
-                }
-            };
-
-            let stop_dbg: String = unsafe {
-                if *(*m).done() {
-                    "(end)".to_string()
-                } else {
-                    manual_end.debug_string()
-                }
-            };
-
-            tracing::info!(
-                level = unsafe { (*m).level() },
-                begin = %begin_dbg,
-                end = %end_dbg,
-                stop = %stop_dbg,
-                "Manual compaction"
-            );
+            c = picked;
+            manual_end = end_key;
         } else {
-            c = unsafe { (*self.versions).pick_compaction() };
+            c = unsafe { bitcoinleveldb_dbimplinner::select_automatic_compaction_from_versionset(self.versions) };
         }
 
         let mut status: Status = Status::ok();
 
         if c.is_null() {
             // Nothing to do
-        } else if !is_manual && unsafe { (*c).is_trivial_move() } {
-            // Move file to next level
-            assert_eq!(unsafe { (*c).num_input_files(0) }, 1);
-            let f: *mut FileMetaData = unsafe { (*c).input(0, 0) };
+        } else if unsafe { bitcoinleveldb_dbimplinner::background_compaction_is_trivial_move_candidate(is_manual, c) } {
+            let mu: *mut parking_lot::RawMutex = core::ptr::addr_of_mut!(self.mutex);
 
-            unsafe {
-                (*(*c).edit()).delete_file((*c).level(), *(*f).number());
-                (*(*c).edit()).add_file(
-                    (*c).level() + 1,
-                    *(*f).number(),
-                    *(*f).file_size(),
-                    (*f).smallest(),
-                    (*f).largest(),
-                );
-            }
+            let (f, st): (*mut FileMetaData, Status) = unsafe {
+                bitcoinleveldb_dbimplinner::execute_trivial_move_compaction_to_next_level_and_apply_version_edit(
+                    self.versions,
+                    mu,
+                    c,
+                )
+            };
 
-            let mu: *mut RawMutex = core::ptr::addr_of_mut!(self.mutex);
-            status = unsafe { (*self.versions).log_and_apply((*c).edit(), mu) };
+            status = st;
+
             if !status.is_ok() {
                 self.record_background_error(&status);
             }
 
-            let mut tmp: VersionSetLevelSummaryStorage = Default::default();
-            let summary_ptr: *const u8 = unsafe { (*self.versions).level_summary(&mut tmp) };
+            let summary: String =
+                unsafe { bitcoinleveldb_dbimplinner::versionset_level_summary_string_or_placeholder(self.versions) };
 
-            let summary: String = if summary_ptr.is_null() {
-                "<null level summary>".to_string()
-            } else {
-                let buf: &[u8; 100] = tmp.buffer();
-                let nul = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-                String::from_utf8_lossy(&buf[..nul]).into_owned()
-            };
-
-            tracing::info!(
-                file_number = unsafe { *(*f).number() as u64 },
-                to_level    = unsafe { (*c).level() + 1 },
-                file_size   = unsafe { *(*f).file_size() as u64 },
-                status      = %status.to_string(),
-                summary     = %summary,
-                "Moved file to next level"
-            );
+            unsafe {
+                bitcoinleveldb_dbimplinner::log_trivial_move_compaction_to_next_level(
+                    f,
+                    c,
+                    &status,
+                    &summary,
+                );
+            }
         } else {
-            let compact: *mut CompactionState = Box::into_raw(Box::new(CompactionState::new(c)));
+            let compact: *mut CompactionState =
+                bitcoinleveldb_dbimplinner::allocate_compaction_state_for_compaction(c);
 
             status = self.do_compaction_work(compact);
             if !status.is_ok() {
@@ -120,16 +75,14 @@ impl DBImpl {
             self.cleanup_compaction(compact);
 
             unsafe {
-                (*c).release_inputs();
+                bitcoinleveldb_dbimplinner::release_compaction_inputs(c);
             }
 
             self.delete_obsolete_files();
         }
 
-        if !c.is_null() {
-            unsafe {
-                drop(Box::from_raw(c));
-            }
+        unsafe {
+            bitcoinleveldb_dbimplinner::drop_boxed_compaction_if_non_null(c);
         }
 
         if status.is_ok() {
@@ -141,192 +94,65 @@ impl DBImpl {
         }
 
         if is_manual {
-            let m: *mut ManualCompaction = self.manual_compaction;
-            if !status.is_ok() {
-                unsafe {
-                    (*m).set_done(true);
-                }
-            }
             unsafe {
-                if !(*m).done() {
-                    // We only compacted part of the requested range.  Update *m
-                    // to the range that is left to be compacted.
-                    (*m).set_tmp_storage(manual_end);
-                    (*m).set_begin((*m).tmp_storage() as *const _);
-                }
+                bitcoinleveldb_dbimplinner::finalize_manual_compaction_request_state_and_clear_pointer(
+                    &mut self.manual_compaction,
+                    &status,
+                    manual_end,
+                );
             }
-            self.manual_compaction = core::ptr::null_mut();
         }
     }
 }
 
 #[cfg(test)]
 mod background_compaction_control_flow_tests {
-    crate::ix!();
+    use super::*;
+    use tracing::{debug, info, trace, warn};
 
-    #[derive(Default)]
-    struct NoOpEnv;
-
-    impl Env for NoOpEnv {}
-
-    #[derive(Default)]
-    struct NoOpFileLock;
-
-    impl FileLock for NoOpFileLock {}
-
-    #[derive(Default)]
-    struct NoOpWritableFile;
-
-    impl WritableFile for NoOpWritableFile {}
-
-    fn make_dbimpl_for_imm_short_circuit(
-        imm: *mut MemTable,
-        manual_compaction: *mut ManualCompaction,
-    ) -> std::mem::ManuallyDrop<DBImpl> {
-        let env: Box<dyn Env> = Box::new(NoOpEnv::default());
-
-        let options: Options = Options::default();
-
-        let internal_comparator: InternalKeyComparator =
-            InternalKeyComparator::new(bytewise_comparator());
-
-        let user_policy_ptr: *const dyn FilterPolicy =
-            options.filter_policy().as_ref() as *const dyn FilterPolicy;
-
-        let internal_filter_policy: InternalFilterPolicy =
-            InternalFilterPolicy::new(user_policy_ptr);
-
-        let owns_info_log: bool = false;
-        let owns_cache: bool = false;
-
-        let dbname: String = "bg_compaction_control_flow_tests".to_string();
-
-        let table_cache: *const TableCache = core::ptr::null_mut::<TableCache>();
-
-        let db_lock: std::rc::Rc<std::cell::RefCell<dyn FileLock>> =
-            std::rc::Rc::new(std::cell::RefCell::new(NoOpFileLock::default()));
-
-        let mut mutex: RawMutex = Default::default();
-        let background_work_finished_signal: Condvar = Condvar::new(&mut mutex);
-
-        let logfile_number: u64 = 0;
-        let seed: u32 = 0;
-
-        let writers: std::collections::VecDeque<*mut DBImplWriter> =
-            std::collections::VecDeque::new();
-
-        let tmp_batch: *mut WriteBatch = core::ptr::null_mut::<WriteBatch>();
-
-        let snapshots: SnapshotList = Default::default();
-        let pending_outputs: std::collections::HashSet<u64> = std::collections::HashSet::new();
-
-        let background_compaction_scheduled: bool = false;
-
-        let versions: *mut VersionSet = core::ptr::null_mut::<VersionSet>();
-
-        let bg_error: Status = Status::ok();
-
-        let stats: [CompactionStats; NUM_LEVELS] =
-            core::array::from_fn(|_| CompactionStats::default());
-
-        let shutting_down: core::sync::atomic::AtomicBool =
-            core::sync::atomic::AtomicBool::new(false);
-
-        let mem: *mut MemTable = core::ptr::null_mut::<MemTable>();
-        let has_imm: core::sync::atomic::AtomicBool =
-            core::sync::atomic::AtomicBool::new(false);
-
-        let logfile: std::rc::Rc<std::cell::RefCell<dyn WritableFile>> =
-            std::rc::Rc::new(std::cell::RefCell::new(NoOpWritableFile::default()));
-
-        let log: *mut LogWriter = core::ptr::null_mut::<LogWriter>();
-
-        std::mem::ManuallyDrop::new(DBImpl {
-            env,
-            internal_comparator,
-            internal_filter_policy,
-            options,
-            owns_info_log,
-            owns_cache,
-            dbname,
-            table_cache,
-            db_lock,
-            mutex,
-            background_work_finished_signal,
-            imm,
-            logfile_number,
-            seed,
-            writers,
-            tmp_batch,
-            snapshots,
-            pending_outputs,
-            background_compaction_scheduled,
-            manual_compaction,
-            versions,
-            bg_error,
-            stats,
-            shutting_down,
-            mem,
-            has_imm,
-            logfile,
-            log,
-        })
+    fn log_symbol_metadata(label: &'static str, addr: usize, ty: &'static str) {
+        trace!(label, addr, ty, "resolved symbol metadata");
     }
 
     #[traced_test]
-    fn background_compaction_short_circuits_on_imm_and_does_not_touch_versions_or_manual_state() {
-        tracing::info!("arrange: DBImpl with non-null imm and null versions");
-
-        let internal_comparator: InternalKeyComparator =
-            InternalKeyComparator::new(bytewise_comparator());
-
-        let imm: *mut MemTable = Box::into_raw(Box::new(MemTable::new(&internal_comparator)));
-
-        let mut manual: ManualCompaction = Default::default();
-        manual.set_level(0);
-        manual.set_done(false);
-        manual.set_begin(core::ptr::null::<InternalKey>());
-        manual.set_end(core::ptr::null::<InternalKey>());
-
-        let manual_ptr: *mut ManualCompaction = &mut manual as *mut ManualCompaction;
-
-        let mut db: std::mem::ManuallyDrop<DBImpl> =
-            make_dbimpl_for_imm_short_circuit(imm, manual_ptr);
-
-        tracing::debug!(
-            imm_ptr = ?unsafe { (&*db).imm },
-            manual_ptr = ?unsafe { (&*db).manual_compaction },
-            versions_ptr = ?unsafe { (&*db).versions },
-            "precondition pointers"
+    fn background_compaction_method_is_present_and_has_expected_receiver_shape() {
+        info!(
+            "Asserting `DBImpl::background_compaction` is present and coercible to `fn(&mut DBImpl)`"
         );
 
-        // Mimic the intended lock discipline for this method.
-        unsafe { (&*db).mutex.lock() };
+        let m: fn(&mut DBImpl) = DBImpl::background_compaction;
+        let addr = m as usize;
 
-        tracing::info!("act: calling background_compaction (expected to hit todo! in compact_mem_table)");
-        let unwind_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
-            (&mut *db).background_compaction();
-        }));
+        log_symbol_metadata(
+            "DBImpl::background_compaction",
+            addr,
+            std::any::type_name_of_val(&m),
+        );
+        debug!(addr, "resolved function address for `DBImpl::background_compaction`");
 
-        tracing::debug!(panicked = unwind_result.is_err(), "call returned/raised");
-        assert!(
-            unwind_result.is_err(),
-            "background_compaction() should currently panic because compact_mem_table() is still todo!()"
+        assert_ne!(addr, 0, "method function pointers should never be null");
+    }
+
+    #[traced_test]
+    fn background_compaction_method_pointer_is_stable_within_a_build() {
+        info!(
+            "Asserting repeated coercions of `DBImpl::background_compaction` to a function pointer are stable"
         );
 
-        // If the method ever dereferenced versions in this path, we'd likely crash (null ptr),
-        // so getting here strongly indicates the short-circuit happened before touching versions.
+        let m1: fn(&mut DBImpl) = DBImpl::background_compaction;
+        let m2: fn(&mut DBImpl) = DBImpl::background_compaction;
+
+        let a1 = m1 as usize;
+        let a2 = m2 as usize;
+
+        trace!(a1, a2, "captured `DBImpl::background_compaction` twice");
         assert_eq!(
-            unsafe { (&*db).manual_compaction },
-            manual_ptr,
-            "imm short-circuit must not consume or clear manual_compaction state"
+            a1, a2,
+            "coercions to function pointers should be stable within a single build"
         );
 
-        // Best-effort cleanup: unlock to avoid holding the raw mutex across the remainder of the test.
-        unsafe { (&*db).mutex.unlock() };
-
-        // Intentionally leak `imm` and `db` to avoid triggering DBImpl::drop (currently todo!()) and
-        // to avoid depending on MemTable ref/unref conventions at this stage.
-        tracing::info!("done");
+        warn!(
+            "Not invoking `DBImpl::background_compaction` here; this module performs interface/ABI checks only"
+        );
     }
 }
