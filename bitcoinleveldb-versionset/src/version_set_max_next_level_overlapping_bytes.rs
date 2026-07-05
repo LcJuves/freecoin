@@ -97,69 +97,10 @@ impl MaxNextLevelOverlappingBytes for VersionSet {
 #[cfg(test)]
 mod version_set_max_next_level_overlapping_bytes_exhaustive_test_suite {
     use super::*;
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
-    use tracing::{debug, error, info, trace, warn};
-
-    fn make_unique_temp_db_dir(prefix: &str) -> PathBuf {
-        let pid = std::process::id();
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-
-        let mut p = std::env::temp_dir();
-        p.push(format!("{prefix}_{pid}_{nanos}"));
-        p
-    }
-
-    fn remove_dir_all_best_effort(dir: &Path) {
-        match std::fs::remove_dir_all(dir) {
-            Ok(()) => trace!(dir = %dir.display(), "removed temp db dir"),
-            Err(e) => warn!(dir = %dir.display(), error = ?e, "failed to remove temp db dir (best effort)"),
-        }
-    }
-
-    fn assert_status_ok(st: &Status, context: &'static str) {
-        if !st.is_ok() {
-            error!(?st, context, "unexpected non-ok Status");
-            panic!("unexpected non-ok Status in {context}");
-        }
-        trace!(context, "Status OK");
-    }
-
-    fn make_ikey(user_key: &str, seq: u64) -> InternalKey {
-        InternalKey::new(&Slice::from(user_key), seq, ValueType::TypeValue)
-    }
-
-    fn make_internal_key_comparator_from_options(options: &Options) -> InternalKeyComparator {
-        let ucmp_ptr: *const dyn SliceComparator =
-            options.comparator().as_ref() as *const dyn SliceComparator;
-        InternalKeyComparator::new(ucmp_ptr)
-    }
-
-    struct RawMutexTestGuard {
-        mu: *mut RawMutex,
-    }
-
-    impl RawMutexTestGuard {
-        fn lock(mu: *mut RawMutex) -> Self {
-            trace!(mu_ptr = %format!("{:p}", mu), "RawMutexTestGuard::lock");
-            unsafe { (*mu).lock() };
-            Self { mu }
-        }
-    }
-
-    impl Drop for RawMutexTestGuard {
-        fn drop(&mut self) {
-            trace!(mu_ptr = %format!("{:p}", self.mu), "RawMutexTestGuard::drop (unlock)");
-            unsafe { (*self.mu).unlock() };
-        }
-    }
 
     #[traced_test]
     fn max_next_level_overlapping_bytes_returns_expected_best_sum() {
-        let dir = make_unique_temp_db_dir("versionset_max_next_level_overlap");
+        let dir = build_unique_temporary_database_directory_path("versionset_max_next_level_overlap");
         std::fs::create_dir_all(&dir).unwrap();
         let dbname = dir.to_string_lossy().to_string();
 
@@ -168,7 +109,7 @@ mod version_set_max_next_level_overlapping_bytes_exhaustive_test_suite {
         options.set_create_if_missing(true);
         options.set_error_if_exists(false);
 
-        let icmp = Box::new(make_internal_key_comparator_from_options(options.as_ref()));
+        let icmp = Box::new(build_internal_key_comparator_from_database_options(options.as_ref()));
         let mut table_cache = Box::new(TableCache::new(&dbname, options.as_ref(), 128));
         let mut mu = Box::new(RawMutex::INIT);
 
@@ -181,23 +122,23 @@ mod version_set_max_next_level_overlapping_bytes_exhaustive_test_suite {
 
         let mut save_manifest: bool = false;
         let st = vs.recover(&mut save_manifest as *mut bool);
-        assert_status_ok(&st, "recover");
+        assert_status_is_ok_or_panic(&st, "recover");
 
-        let _guard = RawMutexTestGuard::lock(mu.as_mut() as *mut RawMutex);
+        let _guard = RawMutexExclusiveTestGuard::acquire_from_raw_mutex(mu.as_mut() as *mut RawMutex);
 
         // Level 1 files: A=[a,e], B=[f,k]
         let mut e1a = VersionEdit::default();
         let f1a = vs.new_file_number();
-        e1a.add_file(1, f1a, 1, &make_ikey("a", 1), &make_ikey("e", 1));
-        assert_status_ok(
+        e1a.add_file(1, f1a, 1, &make_value_internal_key_for_user_key("a", 1), &make_value_internal_key_for_user_key("e", 1));
+        assert_status_is_ok_or_panic(
             &vs.log_and_apply(&mut e1a as *mut VersionEdit, mu.as_mut() as *mut RawMutex),
             "log_and_apply L1 A",
         );
 
         let mut e1b = VersionEdit::default();
         let f1b = vs.new_file_number();
-        e1b.add_file(1, f1b, 1, &make_ikey("f", 1), &make_ikey("k", 1));
-        assert_status_ok(
+        e1b.add_file(1, f1b, 1, &make_value_internal_key_for_user_key("f", 1), &make_value_internal_key_for_user_key("k", 1));
+        assert_status_is_ok_or_panic(
             &vs.log_and_apply(&mut e1b as *mut VersionEdit, mu.as_mut() as *mut RawMutex),
             "log_and_apply L1 B",
         );
@@ -205,16 +146,16 @@ mod version_set_max_next_level_overlapping_bytes_exhaustive_test_suite {
         // Level 2 files: X=[c,g] size 100, Y=[h,j] size 200
         let mut e2x = VersionEdit::default();
         let f2x = vs.new_file_number();
-        e2x.add_file(2, f2x, 100, &make_ikey("c", 1), &make_ikey("g", 1));
-        assert_status_ok(
+        e2x.add_file(2, f2x, 100, &make_value_internal_key_for_user_key("c", 1), &make_value_internal_key_for_user_key("g", 1));
+        assert_status_is_ok_or_panic(
             &vs.log_and_apply(&mut e2x as *mut VersionEdit, mu.as_mut() as *mut RawMutex),
             "log_and_apply L2 X",
         );
 
         let mut e2y = VersionEdit::default();
         let f2y = vs.new_file_number();
-        e2y.add_file(2, f2y, 200, &make_ikey("h", 1), &make_ikey("j", 1));
-        assert_status_ok(
+        e2y.add_file(2, f2y, 200, &make_value_internal_key_for_user_key("h", 1), &make_value_internal_key_for_user_key("j", 1));
+        assert_status_is_ok_or_panic(
             &vs.log_and_apply(&mut e2y as *mut VersionEdit, mu.as_mut() as *mut RawMutex),
             "log_and_apply L2 Y",
         );
@@ -223,6 +164,6 @@ mod version_set_max_next_level_overlapping_bytes_exhaustive_test_suite {
         debug!(best, "max_next_level_overlapping_bytes");
         assert_eq!(best, 300, "expected best overlap sum to be 100+200=300");
 
-        remove_dir_all_best_effort(&dir);
+        remove_directory_tree_best_effort(&dir);
     }
 }

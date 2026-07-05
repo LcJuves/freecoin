@@ -146,7 +146,7 @@ members = [
     "bitcoinchain-params", 
     "bitcoinleveldb-arena", 
     "bitcoinleveldb-batch", 
-    "bitcoinleveldb-bench", 
+    "bitcoinleveldbt-bench", 
     "bitcoinleveldb-block", 
     "bitcoinleveldb-blockbuilder", 
     "bitcoinleveldb-blockconstructor", 
@@ -170,7 +170,7 @@ members = [
     "bitcoinleveldb-dbinterface", 
     "bitcoinleveldb-dbiter", 
     "bitcoinleveldb-dbiterstate",
-    "bitcoinleveldb-dbtest", 
+    "bitcoinleveldbt-dbtest", 
     "bitcoinleveldb-dumpfile", 
     "bitcoinleveldb-duplex", 
     "bitcoinleveldb-emptyiterator", 
@@ -221,8 +221,7 @@ members = [
     "bitcoinleveldb-tablecache", 
     "bitcoinleveldb-tableconstructor", 
     "bitcoinleveldb-tablerep", 
-    "bitcoinleveldb-test", 
-    "bitcoinleveldb-testenv", 
+    "bitcoinleveldbt-env", 
     "bitcoinleveldb-util", 
     "bitcoinleveldb-version", 
     "bitcoinleveldb-versionedit", 
@@ -264,7 +263,7 @@ members = [
     "bitcoinwallet-spend", 
     "bitcoinleveldb-versionsetutil", 
     "bitcoinleveldb-versionsetinterface", 
-    "bitcoinleveldb-mockversionset", 
+    "bitcoinleveldbt-mockversionset", 
     "bitcoinsecp256k1-modinv64", 
     "bitcoinsecp256k1-modinv32", 
     "bitcoinsecp256k1-fe10x26", 
@@ -276,12 +275,44 @@ members = [
     "bitcoinsecp256k1-eckey", 
     "bitcoinsecp256k1-ecmult", 
     "bitcoinsecp256k1-ecmultgen", 
-    "bitcoinsecp256k1-ecmultconst"
-, "bitcoinleveldb-dbimplinner"]
+    "bitcoinsecp256k1-ecmultconst",
+    "bitcoinleveldb-dbimplinner", 
+    "bitcoinleveldbt-versionsettestutil", 
+    "bitcoinleveldbt-faultinjection", 
+    "bitcoinleveldbt-corruption", 
+    "bitcoinleveldbt-recovery", 
+    "bitcoinleveldbt-autocompaction", 
+    "bitcoinleveldbt-capi", 
+    "bitcoinleveldbt-issue178", 
+    "bitcoinleveldbt-issue200", 
+    "bitcoinleveldbt-util", 
+    "bitcoinleveldbt-issue320", 
+    "bitcoinleveldbt-snapshot", 
+    "bitcoinleveldbt-randomized", 
+    "bitcoinleveldbt-mt", 
+    "bitcoinleveldbt-table", 
+    "bitcoinleveldb-test", 
+    "bitcoinleveldbt-issue44", 
+    "bitcoinleveldbt-issue474", 
+    "bitcoinleveldbt-sparsemerge" 
+]
 
 [profile.dev]
 debug = 2
 opt-level = 0
+
+[profile.test]
+codegen-units = 1
+debug = true
+lto = false
+test-threads = 1
+opt-level = 3
+
+[profile.bench]
+codegen-units = 1
+debug = false
+lto = "fat"
+opt-level = 3
 
 [workspace.dependencies]
 #qmetaobject            = "0.2.7"
@@ -336,8 +367,9 @@ serde_test              = "1.0.177"
 serde_json              = "1.0.140"
 shared-mutex            = "0.3.1"
 socket2                 = "0.4.4"
-sqlite                  = "0.25.3"
-sqlite3                 = "0.24.0"
+sqlite                  = "*"
+sqlite3                 = "*"
+sqlite3-sys             = "*"
 static_assertions       = "1.1.0"
 thiserror               = "1.0.31"
 time                    = { version = "0.3.9",   features   = [ "std", "rand", "serde" ]  }

@@ -3,11 +3,7 @@ crate::ix!();
 
 impl Table {
 
-    pub fn open(
-        options: &Options,
-        file:    Rc<RefCell<dyn RandomAccessFile>>,
-        size:    u64,
-    ) -> Result<Box<Table>, Status> {
+    pub fn open(options: &Options, file: Rc<RefCell<dyn RandomAccessFile>>, size: u64) -> Result<Box<Table>, Status> {
         trace!(
             "Table::open: size={}, footer_len={}",
             size,
@@ -17,38 +13,38 @@ impl Table {
         if size < FOOTER_ENCODED_LENGTH as u64 {
             let msg       = b"file is too short to be an sstable";
             let msg_slice = Slice::from(&msg[..]);
+
             error!(
                 "Table::open: file too short to be an sstable (size={}, required_min={})",
                 size,
                 FOOTER_ENCODED_LENGTH
             );
+
             return Err(Status::corruption(&msg_slice, None));
         }
 
-        let mut footer_buf   = vec![0u8; FOOTER_ENCODED_LENGTH];
+        let mut footer_buf = vec![0u8; FOOTER_ENCODED_LENGTH];
         let mut footer_input = Slice::default();
-
         let read_offset = size - FOOTER_ENCODED_LENGTH as u64;
 
-        let s_read_footer = {
-            use bitcoinleveldb_file::RandomAccessFileRead;
+        let file_name =
+            bitcoinleveldb_blockhandle_random_access_file_name(&file);
 
-            let file_ref = file.borrow();
-            trace!(
-                "Table::open: reading footer from file='{}' at offset={} size={}",
-                file_ref.name(),
-                read_offset,
-                FOOTER_ENCODED_LENGTH
-            );
+        trace!(
+            "Table::open: reading footer from file='{}' at offset={} size={}",
+            file_name,
+            read_offset,
+            FOOTER_ENCODED_LENGTH
+        );
 
-            RandomAccessFileRead::read(
-                &*file_ref,
+        let s_read_footer =
+            bitcoinleveldb_blockhandle_read_random_access_file(
+                &file,
                 read_offset,
                 FOOTER_ENCODED_LENGTH,
-                &mut footer_input,
+                &mut footer_input as *mut Slice,
                 footer_buf.as_mut_ptr(),
-            )
-        };
+            );
 
         if !s_read_footer.is_ok() {
             error!(
@@ -57,9 +53,11 @@ impl Table {
             return Err(s_read_footer);
         }
 
-        let mut footer           = Footer::default();
+        let mut footer = Footer::default();
         let mut footer_input_mut = footer_input;
-        let s_footer             = footer.decode_from(&mut footer_input_mut as *mut Slice);
+        let s_footer = footer.decode_from(
+            &mut footer_input_mut as *mut Slice,
+        );
 
         if !s_footer.is_ok() {
             error!(
@@ -69,7 +67,7 @@ impl Table {
         }
 
         let mut index_block_contents = BlockContents::default();
-        let mut status               = Status::ok();
+        let mut status = Status::ok();
 
         if status.is_ok() {
             let mut opt = ReadOptions::default();
@@ -83,12 +81,13 @@ impl Table {
                 footer.index_handle().size()
             );
 
-            status = read_block(
-                file.clone(),
-                &opt,
-                footer.index_handle(),
-                &mut index_block_contents as *mut BlockContents,
-            );
+            status =
+                bitcoinleveldb_blockhandle_read_block_from_file_ref(
+                    &file,
+                    &opt,
+                    footer.index_handle(),
+                    &mut index_block_contents as *mut BlockContents,
+                );
         }
 
         if !status.is_ok() {
@@ -98,13 +97,16 @@ impl Table {
             return Err(status);
         }
 
-        trace!("Table::open: constructing index Block and TableRep");
+        trace!(
+            "Table::open: constructing index Block and TableRep"
+        );
 
         let index_block = Box::new(Block::new(&index_block_contents));
 
         let cache_id = unsafe {
             let cache_ptr_ref = options.block_cache();
             let cache_ptr: *mut Cache = *cache_ptr_ref;
+
             if cache_ptr.is_null() {
                 0
             } else {
@@ -113,12 +115,15 @@ impl Table {
             }
         };
 
-        let mut rep_options = options.clone();
-        rep_options.set_comparator(Arc::new(BytewiseComparatorImpl::default()));
-        rep_options.set_filter_policy(Arc::new(NullFilterPolicy::default()));
-
+        // Preserve the caller-provided comparator and filter policy exactly.
+        //
+        // DB callers arrive here with sanitized internal-key-aware options,
+        // while focused regression tests may intentionally supply custom
+        // comparator or bloom-filter semantics. Replacing either here makes
+        // reopened SSTables seek under the wrong ordering and silently drops
+        // filter behavior.
         let rep = TableRep::new(
-            rep_options.clone(),
+            options.clone(),
             file.clone(),
             cache_id,
             *footer.metaindex_handle(),
@@ -126,7 +131,7 @@ impl Table {
         );
 
         let rep_box: Box<TableRep> = Box::new(rep);
-        let rep_ptr: *mut TableRep  = Box::into_raw(rep_box);
+        let rep_ptr: *mut TableRep = Box::into_raw(rep_box);
 
         // Preserve the original heap/ptr semantics: allocate Table on the heap,
         // convert to a raw pointer for read_meta, then rewrap into Box for return.

@@ -2,7 +2,6 @@
 crate::ix!();
 
 impl DBImpl {
-
     /// Recover the descriptor from persistent storage.
     ///
     /// May do a significant amount of work to recover recently logged updates.
@@ -20,39 +19,46 @@ impl DBImpl {
         let tid = std::thread::current().id();
         let t_start = std::time::Instant::now();
 
-        #[cfg(any(test, debug_assertions))]
-        {
-            tracing::info!(
-                ?tid,
-                dbname = %self.dbname,
-                edit_ptr = edit as usize,
-                save_manifest_ptr = save_manifest as usize,
-                "DBImpl::recover: enter"
-            );
-        }
-
-        println!("recover -- mark0");
+        tracing::info!(
+            target: "bitcoinleveldb_dbimpl::recover",
+            event = "dbimpl_recover_entry",
+            ?tid,
+            dbname = %self.dbname,
+            edit_ptr = edit as usize,
+            save_manifest_ptr = save_manifest as usize,
+            versions_ptr = self.versions as usize,
+            db_lock_ptr = self.db_lock as usize,
+            "DBImpl::recover: enter"
+        );
 
         // Ignore error from CreateDir since the creation of the DB is
         // committed only when the descriptor is created, and this directory
         // may already exist from a previous failed creation attempt.
-        let _ = self.env.as_mut().create_dir(&self.dbname);
-        assert!(self.db_lock.is_null());
+        let create_dir_status: Status = self.env.as_mut().create_dir(&self.dbname);
 
-        println!("recover -- mark1");
+        tracing::debug!(
+            target: "bitcoinleveldb_dbimpl::recover",
+            event = "dbimpl_recover_create_dir_result",
+            ?tid,
+            dbname = %self.dbname,
+            status_ok = create_dir_status.is_ok(),
+            status = %create_dir_status.to_string(),
+            "DBImpl::recover: create_dir completed"
+        );
+
+        assert!(self.db_lock.is_null());
 
         let lock_path: String = lock_file_name(&self.dbname);
 
-        #[cfg(any(test, debug_assertions))]
-        {
-            tracing::info!(
-                ?tid,
-                dbname = %self.dbname,
-                file = %lock_path,
-                db_lock_ptr = self.db_lock as usize,
-                "DBImpl::recover: about to call Env::lock_file"
-            );
-        }
+        tracing::info!(
+            target: "bitcoinleveldb_dbimpl::recover",
+            event = "dbimpl_recover_lock_file_begin",
+            ?tid,
+            dbname = %self.dbname,
+            file = %lock_path,
+            db_lock_ptr = self.db_lock as usize,
+            "DBImpl::recover: about to call Env::lock_file"
+        );
 
         let t_lock = std::time::Instant::now();
         let mut s: Status = self
@@ -60,85 +66,108 @@ impl DBImpl {
             .as_mut()
             .lock_file(&lock_path, core::ptr::addr_of_mut!(self.db_lock));
 
-        println!("recover -- mark2");
-
-        #[cfg(any(test, debug_assertions))]
-        {
-            tracing::info!(
-                ?tid,
-                dbname = %self.dbname,
-                file = %lock_path,
-                status_ok = s.is_ok(),
-                status = %s.to_string(),
-                db_lock_null = self.db_lock.is_null(),
-                elapsed_ms = t_lock.elapsed().as_millis() as u64,
-                "DBImpl::recover: Env::lock_file returned"
-            );
-        }
+        tracing::info!(
+            target: "bitcoinleveldb_dbimpl::recover",
+            event = "dbimpl_recover_lock_file_end",
+            ?tid,
+            dbname = %self.dbname,
+            file = %lock_path,
+            status_ok = s.is_ok(),
+            status = %s.to_string(),
+            db_lock_null = self.db_lock.is_null(),
+            elapsed_ms = t_lock.elapsed().as_millis() as u64,
+            "DBImpl::recover: Env::lock_file returned"
+        );
 
         if s.is_ok() && self.db_lock.is_null() {
             tracing::error!(
+                target: "bitcoinleveldb_dbimpl::recover",
+                event = "dbimpl_recover_lock_file_null_output",
+                ?tid,
+                dbname = %self.dbname,
                 file = %lock_path,
                 "Env::lock_file returned ok but output lock handle was null"
             );
+
             let msg: Slice = Slice::from_str("lock_file returned ok but output was null");
             let fname_slice: Slice = Slice::from(&lock_path);
             return Status::corruption(&msg, Some(&fname_slice));
         }
 
-        println!("recover -- mark3");
-
         if !s.is_ok() {
-            #[cfg(any(test, debug_assertions))]
-            {
-                tracing::error!(
-                    ?tid,
-                    dbname = %self.dbname,
-                    status = %s.to_string(),
-                    elapsed_ms = t_start.elapsed().as_millis() as u64,
-                    "DBImpl::recover: early return due to lock_file failure"
-                );
-            }
+            tracing::error!(
+                target: "bitcoinleveldb_dbimpl::recover",
+                event = "dbimpl_recover_lock_file_failure",
+                ?tid,
+                dbname = %self.dbname,
+                status = %s.to_string(),
+                elapsed_ms = t_start.elapsed().as_millis() as u64,
+                "DBImpl::recover: early return due to lock_file failure"
+            );
+
             return s;
         }
 
-        if !self.env.as_mut().file_exists(&current_file_name(&self.dbname)) {
+        let current_path: String = current_file_name(&self.dbname);
+        let current_exists: bool = self.env.as_mut().file_exists(&current_path);
+
+        tracing::debug!(
+            target: "bitcoinleveldb_dbimpl::recover",
+            event = "dbimpl_recover_current_exists",
+            ?tid,
+            dbname = %self.dbname,
+            current = %current_path,
+            current_exists,
+            create_if_missing = *self.options.create_if_missing(),
+            error_if_exists = *self.options.error_if_exists(),
+            "DBImpl::recover: checked CURRENT existence"
+        );
+
+        if !current_exists {
             if *self.options.create_if_missing() {
-                #[cfg(any(test, debug_assertions))]
-                {
-                    tracing::info!(
-                        ?tid,
-                        dbname = %self.dbname,
-                        "DBImpl::recover: CURRENT missing; create_if_missing=true; calling newdb()"
-                    );
-                }
+                tracing::info!(
+                    target: "bitcoinleveldb_dbimpl::recover",
+                    event = "dbimpl_recover_current_missing_create_db",
+                    ?tid,
+                    dbname = %self.dbname,
+                    current = %current_path,
+                    "DBImpl::recover: CURRENT missing; create_if_missing=true; calling newdb()"
+                );
 
                 s = self.newdb();
+
+                tracing::info!(
+                    target: "bitcoinleveldb_dbimpl::recover",
+                    event = "dbimpl_recover_newdb_result",
+                    ?tid,
+                    dbname = %self.dbname,
+                    status_ok = s.is_ok(),
+                    status = %s.to_string(),
+                    elapsed_ms = t_start.elapsed().as_millis() as u64,
+                    "DBImpl::recover: newdb returned"
+                );
+
                 if !s.is_ok() {
-                    #[cfg(any(test, debug_assertions))]
-                    {
-                        tracing::error!(
-                            ?tid,
-                            dbname = %self.dbname,
-                            status = %s.to_string(),
-                            elapsed_ms = t_start.elapsed().as_millis() as u64,
-                            "DBImpl::recover: newdb() failed"
-                        );
-                    }
+                    tracing::error!(
+                        "[dbimpl-recover-live] event=dbimpl_recover_newdb_failure dbname='{}' status='{}' elapsed_ms={}",
+                        self.dbname,
+                        s.to_string(),
+                        t_start.elapsed().as_millis() as u64,
+                    );
                     return s;
                 }
             } else {
                 let msg: Slice = Slice::from(&self.dbname);
                 let msg2: Slice = Slice::from_str("does not exist (create_if_missing is false)");
 
-                #[cfg(any(test, debug_assertions))]
-                {
-                    tracing::warn!(
-                        ?tid,
-                        dbname = %self.dbname,
-                        "DBImpl::recover: CURRENT missing; create_if_missing=false; returning InvalidArgument"
-                    );
-                }
+                tracing::warn!(
+                    target: "bitcoinleveldb_dbimpl::recover",
+                    event = "dbimpl_recover_current_missing_invalid_argument",
+                    ?tid,
+                    dbname = %self.dbname,
+                    current = %current_path,
+                    "DBImpl::recover: CURRENT missing; create_if_missing=false; returning InvalidArgument"
+                );
 
                 return Status::invalid_argument(&msg, Some(&msg2));
             }
@@ -146,56 +175,53 @@ impl DBImpl {
             let msg: Slice = Slice::from(&self.dbname);
             let msg2: Slice = Slice::from_str("exists (error_if_exists is true)");
 
-            #[cfg(any(test, debug_assertions))]
-            {
-                tracing::warn!(
-                    ?tid,
-                    dbname = %self.dbname,
-                    "DBImpl::recover: CURRENT exists; error_if_exists=true; returning InvalidArgument"
-                );
-            }
+            tracing::warn!(
+                target: "bitcoinleveldb_dbimpl::recover",
+                event = "dbimpl_recover_error_if_exists",
+                ?tid,
+                dbname = %self.dbname,
+                current = %current_path,
+                "DBImpl::recover: CURRENT exists; error_if_exists=true; returning InvalidArgument"
+            );
 
             return Status::invalid_argument(&msg, Some(&msg2));
         }
 
-        println!("recover -- mark4");
-
-        #[cfg(any(test, debug_assertions))]
-        {
-            tracing::info!(
-                ?tid,
-                dbname = %self.dbname,
-                versions_ptr = self.versions as usize,
-                "DBImpl::recover: calling VersionSet::recover"
-            );
-        }
+        tracing::info!(
+            target: "bitcoinleveldb_dbimpl::recover",
+            event = "dbimpl_recover_versionset_recover_begin",
+            ?tid,
+            dbname = %self.dbname,
+            versions_ptr = self.versions as usize,
+            "DBImpl::recover: calling VersionSet::recover"
+        );
 
         let t_vrecover = std::time::Instant::now();
         s = unsafe { (*self.versions).recover(save_manifest) };
 
-        #[cfg(any(test, debug_assertions))]
-        {
-            tracing::info!(
-                ?tid,
-                dbname = %self.dbname,
-                status_ok = s.is_ok(),
-                status = %s.to_string(),
-                elapsed_ms = t_vrecover.elapsed().as_millis() as u64,
-                "DBImpl::recover: VersionSet::recover returned"
-            );
-        }
+        tracing::info!(
+            target: "bitcoinleveldb_dbimpl::recover",
+            event = "dbimpl_recover_versionset_recover_end",
+            ?tid,
+            dbname = %self.dbname,
+            status_ok = s.is_ok(),
+            status = %s.to_string(),
+            save_manifest_value = if save_manifest.is_null() { false } else { unsafe { *save_manifest } },
+            elapsed_ms = t_vrecover.elapsed().as_millis() as u64,
+            "DBImpl::recover: VersionSet::recover returned"
+        );
 
         if !s.is_ok() {
-            #[cfg(any(test, debug_assertions))]
-            {
-                tracing::error!(
-                    ?tid,
-                    dbname = %self.dbname,
-                    status = %s.to_string(),
-                    elapsed_ms = t_start.elapsed().as_millis() as u64,
-                    "DBImpl::recover: returning error from VersionSet::recover"
-                );
-            }
+            tracing::error!(
+                target: "bitcoinleveldb_dbimpl::recover",
+                event = "dbimpl_recover_versionset_recover_failure",
+                ?tid,
+                dbname = %self.dbname,
+                status = %s.to_string(),
+                elapsed_ms = t_start.elapsed().as_millis() as u64,
+                "DBImpl::recover: returning error from VersionSet::recover"
+            );
+
             return s;
         }
 
@@ -211,52 +237,45 @@ impl DBImpl {
         let min_log: u64 = unsafe { (*self.versions).log_number() };
         let prev_log: u64 = unsafe { (*self.versions).prev_log_number() };
 
-        println!("recover -- mark5");
-
         let mut filenames: Vec<String> = Vec::new();
 
-        #[cfg(any(test, debug_assertions))]
-        {
-            tracing::info!(
-                ?tid,
-                dbname = %self.dbname,
-                "DBImpl::recover: calling Env::get_children"
-            );
-        }
+        tracing::info!(
+            target: "bitcoinleveldb_dbimpl::recover",
+            event = "dbimpl_recover_get_children_begin",
+            ?tid,
+            dbname = %self.dbname,
+            "DBImpl::recover: calling Env::get_children"
+        );
 
         let t_children = std::time::Instant::now();
         s = self.env.as_mut().get_children(&self.dbname, &mut filenames);
 
-        #[cfg(any(test, debug_assertions))]
-        {
-            tracing::info!(
-                ?tid,
-                dbname = %self.dbname,
-                status_ok = s.is_ok(),
-                status = %s.to_string(),
-                elapsed_ms = t_children.elapsed().as_millis() as u64,
-                child_count = filenames.len() as u64,
-                "DBImpl::recover: Env::get_children returned"
-            );
-        }
+        tracing::info!(
+            target: "bitcoinleveldb_dbimpl::recover",
+            event = "dbimpl_recover_get_children_end",
+            ?tid,
+            dbname = %self.dbname,
+            status_ok = s.is_ok(),
+            status = %s.to_string(),
+            elapsed_ms = t_children.elapsed().as_millis() as u64,
+            child_count = filenames.len() as u64,
+            "DBImpl::recover: Env::get_children returned"
+        );
 
         if !s.is_ok() {
             return s;
         }
 
-        println!("recover -- mark5a");
-
         let mut expected_live: std::collections::HashSet<u64> = std::collections::HashSet::new();
 
-        #[cfg(any(test, debug_assertions))]
-        {
-            tracing::info!(
-                ?tid,
-                dbname = %self.dbname,
-                versions_ptr = self.versions as usize,
-                "DBImpl::recover: calling VersionSet::add_live_files"
-            );
-        }
+        tracing::info!(
+            target: "bitcoinleveldb_dbimpl::recover",
+            event = "dbimpl_recover_add_live_files_begin",
+            ?tid,
+            dbname = %self.dbname,
+            versions_ptr = self.versions as usize,
+            "DBImpl::recover: calling VersionSet::add_live_files"
+        );
 
         let t_live = std::time::Instant::now();
         unsafe {
@@ -265,25 +284,18 @@ impl DBImpl {
             );
         }
 
-        #[cfg(any(test, debug_assertions))]
-        {
-            tracing::info!(
-                ?tid,
-                dbname = %self.dbname,
-                live_files = expected_live.len() as u64,
-                elapsed_ms = t_live.elapsed().as_millis() as u64,
-                "DBImpl::recover: VersionSet::add_live_files returned"
-            );
-        }
+        tracing::info!(
+            target: "bitcoinleveldb_dbimpl::recover",
+            event = "dbimpl_recover_add_live_files_end",
+            ?tid,
+            dbname = %self.dbname,
+            live_files = expected_live.len() as u64,
+            elapsed_ms = t_live.elapsed().as_millis() as u64,
+            "DBImpl::recover: VersionSet::add_live_files returned"
+        );
 
-        println!("recover -- mark5b");
-
-        let mut expected: std::collections::BTreeSet<u64> =
-            expected_live.into_iter().collect::<std::collections::BTreeSet<u64>>();
-
+        let mut expected: std::collections::BTreeSet<u64> = expected_live.into_iter().collect::<std::collections::BTreeSet<u64>>();
         let mut logs: Vec<u64> = Vec::new();
-
-        println!("recover -- mark6");
 
         for fname in filenames.into_iter() {
             let mut number: u64 = 0;
@@ -292,54 +304,77 @@ impl DBImpl {
             if parse_file_name(&fname, &mut number, &mut ftype) {
                 expected.remove(&number);
 
-                if matches!(ftype, FileType::LogFile) && (number >= min_log || number == prev_log)
-                {
+                if matches!(ftype, FileType::LogFile) && (number >= min_log || number == prev_log) {
                     logs.push(number);
                 }
             }
         }
 
-        println!("recover -- mark7");
+        tracing::info!(
+            target: "bitcoinleveldb_dbimpl::recover",
+            event = "dbimpl_recover_logs_selected",
+            ?tid,
+            dbname = %self.dbname,
+            min_log,
+            prev_log,
+            logs_selected = logs.len() as u64,
+            missing_expected = expected.len() as u64,
+            "DBImpl::recover: selected candidate logs"
+        );
 
         if !expected.is_empty() {
             let buf_string: String = format!("{} missing files; e.g.", expected.len());
             let msg: Slice = Slice::from_str(&buf_string);
 
-            let first: u64 = *expected.iter().next().unwrap();
-            let first_fname: String = table_file_name(&self.dbname, first);
-            let msg2: Slice = Slice::from(&first_fname);
+            let first_missing_path: Option<String> = match expected.iter().next() {
+                Some(first) => Some(table_file_name(&self.dbname, *first)),
+                None => None,
+            };
 
-            #[cfg(any(test, debug_assertions))]
-            {
-                tracing::error!(
-                    ?tid,
-                    dbname = %self.dbname,
-                    missing_count = expected.len() as u64,
-                    example = %first_fname,
-                    "DBImpl::recover: missing expected live files; returning corruption"
-                );
+            tracing::error!(
+                target: "bitcoinleveldb_dbimpl::recover",
+                event = "dbimpl_recover_missing_expected_live_files",
+                ?tid,
+                dbname = %self.dbname,
+                missing_count = expected.len() as u64,
+                example = %first_missing_path.clone().unwrap_or_else(|| String::from("<none>")),
+                "DBImpl::recover: missing expected live files; returning corruption"
+            );
+
+            match first_missing_path {
+                Some(first_fname) => {
+                    let msg2 = Slice::from(&first_fname);
+                    return Status::corruption(&msg, Some(&msg2));
+                }
+                None => {
+                    return Status::corruption(&msg, None);
+                }
             }
-
-            return Status::corruption(&msg, Some(&msg2));
         }
-
-        println!("recover -- mark8");
 
         // Recover in the order in which the logs were generated
         logs.sort();
 
+        if logs.is_empty() {
+            tracing::info!(
+                "[dbimpl-recover-live] event=dbimpl_recover_no_logs_to_replay dbname='{}' min_log={} prev_log={}",
+                self.dbname,
+                min_log,
+                prev_log,
+            );
+        }
+
         for (i, log_number) in logs.iter().copied().enumerate() {
-            #[cfg(any(test, debug_assertions))]
-            {
-                tracing::info!(
-                    ?tid,
-                    dbname = %self.dbname,
-                    log_number,
-                    idx = i as u64,
-                    last = (i == logs.len().saturating_sub(1)) as u64,
-                    "DBImpl::recover: calling recover_log_file"
-                );
-            }
+            tracing::info!(
+                target: "bitcoinleveldb_dbimpl::recover",
+                event = "dbimpl_recover_log_file_begin",
+                ?tid,
+                dbname = %self.dbname,
+                log_number,
+                idx = i as u64,
+                last = (i == logs.len().saturating_sub(1)),
+                "DBImpl::recover: calling recover_log_file"
+            );
 
             let t_log = std::time::Instant::now();
             s = self.recover_log_file(
@@ -350,19 +385,18 @@ impl DBImpl {
                 &mut max_sequence,
             );
 
-            #[cfg(any(test, debug_assertions))]
-            {
-                tracing::info!(
-                    ?tid,
-                    dbname = %self.dbname,
-                    log_number,
-                    status_ok = s.is_ok(),
-                    status = %s.to_string(),
-                    elapsed_ms = t_log.elapsed().as_millis() as u64,
-                    max_sequence,
-                    "DBImpl::recover: recover_log_file returned"
-                );
-            }
+            tracing::info!(
+                target: "bitcoinleveldb_dbimpl::recover",
+                event = "dbimpl_recover_log_file_end",
+                ?tid,
+                dbname = %self.dbname,
+                log_number,
+                status_ok = s.is_ok(),
+                status = %s.to_string(),
+                elapsed_ms = t_log.elapsed().as_millis() as u64,
+                max_sequence,
+                "DBImpl::recover: recover_log_file returned"
+            );
 
             if !s.is_ok() {
                 return s;
@@ -376,28 +410,40 @@ impl DBImpl {
             }
         }
 
-        println!("recover -- mark9");
+        let previous_last_sequence: SequenceNumber = unsafe { (*self.versions).last_sequence() };
 
-        if unsafe { (*self.versions).last_sequence() } < max_sequence {
+        if previous_last_sequence < max_sequence {
             unsafe {
                 (*self.versions).set_last_sequence(max_sequence);
             }
-        }
 
-        #[cfg(any(test, debug_assertions))]
-        {
             tracing::info!(
+                target: "bitcoinleveldb_dbimpl::recover",
+                event = "dbimpl_recover_last_sequence_advanced",
                 ?tid,
                 dbname = %self.dbname,
+                previous_last_sequence,
                 max_sequence,
-                elapsed_ms = t_start.elapsed().as_millis() as u64,
-                "DBImpl::recover: exit ok"
+                "DBImpl::recover: advanced last_sequence after log replay"
             );
         }
 
+        tracing::info!(
+            target: "bitcoinleveldb_dbimpl::recover",
+            event = "dbimpl_recover_exit",
+            ?tid,
+            dbname = %self.dbname,
+            status_ok = true,
+            max_sequence,
+            previous_last_sequence,
+            final_last_sequence = unsafe { (*self.versions).last_sequence() },
+            save_manifest_value = if save_manifest.is_null() { false } else { unsafe { *save_manifest } },
+            elapsed_ms = t_start.elapsed().as_millis() as u64,
+            "DBImpl::recover: exit ok"
+        );
+
         Status::ok()
     }
-
 }
 
 #[cfg(test)]

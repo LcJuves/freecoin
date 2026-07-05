@@ -38,3 +38,5 @@ bitcoinleveldb-snapshot = { path = "../bitcoinleveldb-snapshot" }
 bitcoinleveldb-merger = { path = "../bitcoinleveldb-merger" }
 bitcoinleveldb-comparator = { path = "../bitcoinleveldb-comparator" }
 bitcoinleveldb-posixenv = { path = "../bitcoinleveldb-posixenv" }
+bitcoinleveldbt-versionsettestutil = { path = "../bitcoinleveldbt-versionsettestutil" }
+bitcoinleveldb-tablebuilder = { path = "../bitcoinleveldb-tablebuilder" }

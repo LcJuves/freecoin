@@ -175,50 +175,10 @@ impl VersionSetBuilder {
 #[cfg(test)]
 mod version_set_builder_apply_exhaustive_test_suite {
     use super::*;
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
-    use tracing::{debug, error, info, trace, warn};
-
-    fn make_unique_temp_db_dir(prefix: &str) -> PathBuf {
-        let pid = std::process::id();
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-
-        let mut p = std::env::temp_dir();
-        p.push(format!("{prefix}_{pid}_{nanos}"));
-        p
-    }
-
-    fn remove_dir_all_best_effort(dir: &Path) {
-        match std::fs::remove_dir_all(dir) {
-            Ok(()) => trace!(dir = %dir.display(), "removed temp db dir"),
-            Err(e) => warn!(dir = %dir.display(), error = ?e, "failed to remove temp db dir (best effort)"),
-        }
-    }
-
-    fn assert_status_ok(st: &Status, context: &'static str) {
-        if !st.is_ok() {
-            error!(?st, context, "unexpected non-ok Status");
-            panic!("unexpected non-ok Status in {context}");
-        }
-        trace!(context, "Status OK");
-    }
-
-    fn make_ikey(user_key: &str, seq: u64) -> InternalKey {
-        InternalKey::new(&Slice::from(user_key), seq, ValueType::TypeValue)
-    }
-
-    fn make_internal_key_comparator_from_options(options: &Options) -> InternalKeyComparator {
-        let ucmp_ptr: *const dyn SliceComparator =
-            options.comparator().as_ref() as *const dyn SliceComparator;
-        InternalKeyComparator::new(ucmp_ptr)
-    }
 
     #[traced_test]
     fn builder_apply_updates_compaction_pointers_tracks_deletions_and_queues_new_files() {
-        let dir = make_unique_temp_db_dir("versionset_builder_apply");
+        let dir = build_unique_temporary_database_directory_path("versionset_builder_apply");
         std::fs::create_dir_all(&dir).unwrap();
         let dbname = dir.to_string_lossy().to_string();
 
@@ -227,7 +187,7 @@ mod version_set_builder_apply_exhaustive_test_suite {
         options.set_create_if_missing(true);
         options.set_error_if_exists(false);
 
-        let icmp = Box::new(make_internal_key_comparator_from_options(options.as_ref()));
+        let icmp = Box::new(build_internal_key_comparator_from_database_options(options.as_ref()));
         let mut table_cache = Box::new(TableCache::new(&dbname, options.as_ref(), 16));
 
         let mut vs = VersionSet::new(
@@ -239,7 +199,7 @@ mod version_set_builder_apply_exhaustive_test_suite {
 
         let mut save_manifest: bool = false;
         let st = vs.recover(&mut save_manifest as *mut bool);
-        assert_status_ok(&st, "recover");
+        assert_status_is_ok_or_panic(&st, "recover");
 
         let base = vs.current();
         let mut builder = VersionSetBuilder::new(vs.as_mut() as *mut VersionSet, base);
@@ -251,14 +211,14 @@ mod version_set_builder_apply_exhaustive_test_suite {
         let file_num: u64 = 999;
         let file_size: u64 = 16384 * 2;
 
-        let cp_key = make_ikey("cp", 1);
+        let cp_key = make_value_internal_key_for_user_key("cp", 1);
 
         let mut edit = VersionEdit::default();
         edit.set_compact_pointer(level, &cp_key);
 
         // Deletion marker for the same file number that we add below should be removed by apply().
         edit.delete_file(level, file_num);
-        edit.add_file(level, file_num, file_size, &make_ikey("a", 1), &make_ikey("b", 1));
+        edit.add_file(level, file_num, file_size, &make_value_internal_key_for_user_key("a", 1), &make_value_internal_key_for_user_key("b", 1));
 
         builder.apply(&mut edit as *mut VersionEdit);
 
@@ -299,6 +259,6 @@ mod version_set_builder_apply_exhaustive_test_suite {
             );
         }
 
-        remove_dir_all_best_effort(&dir);
+        remove_directory_tree_best_effort(&dir);
     }
 }

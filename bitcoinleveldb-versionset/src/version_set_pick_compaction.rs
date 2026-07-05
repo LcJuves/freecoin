@@ -166,69 +166,10 @@ impl PickCompaction for VersionSet {
 #[cfg(test)]
 mod version_set_pick_compaction_exhaustive_test_suite {
     use super::*;
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
-    use tracing::{debug, error, info, trace, warn};
-
-    fn make_unique_temp_db_dir(prefix: &str) -> PathBuf {
-        let pid = std::process::id();
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-
-        let mut p = std::env::temp_dir();
-        p.push(format!("{prefix}_{pid}_{nanos}"));
-        p
-    }
-
-    fn remove_dir_all_best_effort(dir: &Path) {
-        match std::fs::remove_dir_all(dir) {
-            Ok(()) => trace!(dir = %dir.display(), "removed temp db dir"),
-            Err(e) => warn!(dir = %dir.display(), error = ?e, "failed to remove temp db dir (best effort)"),
-        }
-    }
-
-    fn assert_status_ok(st: &Status, context: &'static str) {
-        if !st.is_ok() {
-            error!(?st, context, "unexpected non-ok Status");
-            panic!("unexpected non-ok Status in {context}");
-        }
-        trace!(context, "Status OK");
-    }
-
-    fn make_ikey(user_key: &str, seq: u64) -> InternalKey {
-        InternalKey::new(&Slice::from(user_key), seq, ValueType::TypeValue)
-    }
-
-    fn make_internal_key_comparator_from_options(options: &Options) -> InternalKeyComparator {
-        let ucmp_ptr: *const dyn SliceComparator =
-            options.comparator().as_ref() as *const dyn SliceComparator;
-        InternalKeyComparator::new(ucmp_ptr)
-    }
-
-    struct RawMutexTestGuard {
-        mu: *mut RawMutex,
-    }
-
-    impl RawMutexTestGuard {
-        fn lock(mu: *mut RawMutex) -> Self {
-            trace!(mu_ptr = %format!("{:p}", mu), "RawMutexTestGuard::lock");
-            unsafe { (*mu).lock() };
-            Self { mu }
-        }
-    }
-
-    impl Drop for RawMutexTestGuard {
-        fn drop(&mut self) {
-            trace!(mu_ptr = %format!("{:p}", self.mu), "RawMutexTestGuard::drop (unlock)");
-            unsafe { (*self.mu).unlock() };
-        }
-    }
 
     #[traced_test]
     fn pick_compaction_returns_null_when_no_compaction_needed() {
-        let dir = make_unique_temp_db_dir("versionset_pick_compaction_none");
+        let dir = build_unique_temporary_database_directory_path("versionset_pick_compaction_none");
         std::fs::create_dir_all(&dir).unwrap();
         let dbname = Box::new(dir.to_string_lossy().to_string());
 
@@ -237,7 +178,7 @@ mod version_set_pick_compaction_exhaustive_test_suite {
         options.set_create_if_missing(true);
         options.set_error_if_exists(false);
 
-        let icmp = Box::new(make_internal_key_comparator_from_options(options.as_ref()));
+        let icmp = Box::new(build_internal_key_comparator_from_database_options(options.as_ref()));
 
         let mut table_cache = Box::new(TableCache::new(dbname.as_ref(), options.as_ref(), 128));
 
@@ -250,19 +191,19 @@ mod version_set_pick_compaction_exhaustive_test_suite {
 
         let mut save_manifest: bool = false;
         let st0 = vs.recover(&mut save_manifest as *mut bool);
-        assert_status_ok(&st0, "recover");
+        assert_status_is_ok_or_panic(&st0, "recover");
 
         let c = vs.pick_compaction();
         debug!(is_null = c.is_null(), "pick_compaction result");
         assert!(c.is_null(), "expected no compaction on a fresh empty db");
 
-        remove_dir_all_best_effort(&dir);
+        remove_directory_tree_best_effort(&dir);
     }
 
     #[traced_test]
     fn pick_compaction_selects_level0_when_many_l0_files_present() {
-        let dir = make_unique_temp_db_dir("versionset_pick_compaction_l0_trigger");
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = build_unique_temporary_database_directory_path("versionset_pick_compaction_l0_trigger");
+        create_directory_tree_or_panic(&dir);
         let dbname = Box::new(dir.to_string_lossy().to_string());
 
         let env = PosixEnv::shared();
@@ -270,7 +211,7 @@ mod version_set_pick_compaction_exhaustive_test_suite {
         options.set_create_if_missing(true);
         options.set_error_if_exists(false);
 
-        let icmp = Box::new(make_internal_key_comparator_from_options(options.as_ref()));
+        let icmp = Box::new(build_internal_key_comparator_from_database_options(options.as_ref()));
 
         let mut table_cache = Box::new(TableCache::new(dbname.as_ref(), options.as_ref(), 128));
         let mut mu = Box::new(RawMutex::INIT);
@@ -284,27 +225,72 @@ mod version_set_pick_compaction_exhaustive_test_suite {
 
         let mut save_manifest: bool = false;
         let st0 = vs.recover(&mut save_manifest as *mut bool);
-        assert_status_ok(&st0, "recover");
+        assert_status_is_ok_or_panic(&st0, "recover");
 
-        let _guard = RawMutexTestGuard::lock(mu.as_mut() as *mut RawMutex);
+        let triggering_l0_file_count: u64 = (L0_COMPACTION_TRIGGER as u64).saturating_add(1);
 
-        for i in 0..8u64 {
+        debug!(
+            target: "bitcoinleveldb_versionset::version_set_pick_compaction::test",
+            event = "versionset_pick_compaction_l0_trigger_configuration",
+            l0_compaction_trigger = L0_COMPACTION_TRIGGER as u64,
+            triggering_l0_file_count = triggering_l0_file_count
+        );
+
+        let _guard =
+            RawMutexExclusiveTestGuard::acquire_from_raw_mutex(mu.as_mut() as *mut RawMutex);
+
+        for i in 0..triggering_l0_file_count {
             let mut e = VersionEdit::default();
             let fnum = vs.new_file_number();
             let a = format!("k{:02}", i);
             let b = format!("k{:02}", i);
-            e.add_file(0, fnum, 10, &make_ikey(&a, 1), &make_ikey(&b, 1));
+            e.add_file(
+                0,
+                fnum,
+                10,
+                &make_value_internal_key_for_user_key(&a, 1),
+                &make_value_internal_key_for_user_key(&b, 1),
+            );
             let st = vs.log_and_apply(&mut e as *mut VersionEdit, mu.as_mut() as *mut RawMutex);
-            assert_status_ok(&st, "log_and_apply add L0 file");
+            assert_status_is_ok_or_panic(&st, "log_and_apply add L0 file");
         }
 
         let c = vs.pick_compaction();
-        debug!(is_null = c.is_null(), "pick_compaction after adding L0 files");
+        debug!(
+            target: "bitcoinleveldb_versionset::version_set_pick_compaction::test",
+            event = "versionset_pick_compaction_after_l0_growth",
+            compaction_ptr = ?c
+        );
         assert!(
             !c.is_null(),
-            "expected a compaction after many L0 files are present"
+            "adding more than L0_COMPACTION_TRIGGER files to level 0 should produce a compaction"
         );
 
-        remove_dir_all_best_effort(&dir);
+        let picked_level = unsafe { (*c).level() };
+        let seeded_input_count = unsafe { (*c).num_input_files(0) };
+
+        debug!(
+            target: "bitcoinleveldb_versionset::version_set_pick_compaction::test",
+            event = "versionset_pick_compaction_selected_compaction",
+            picked_level = picked_level,
+            seeded_input_count = seeded_input_count
+        );
+
+        assert_eq!(
+            picked_level,
+            0,
+            "the compaction selected by the level-0 trigger must compact level 0"
+        );
+        assert!(
+            seeded_input_count >= 1,
+            "a selected compaction must contain at least one seeded input file"
+        );
+
+        unsafe {
+            drop(Box::from_raw(c));
+        }
+
+        remove_directory_tree_best_effort(&dir);
     }
+
 }

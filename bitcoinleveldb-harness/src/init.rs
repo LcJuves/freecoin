@@ -4,33 +4,6 @@ crate::ix!();
 impl Harness {
 
     pub fn init(&mut self, args: &TestArgs) {
-        /*
-            delete constructor_;
-        constructor_ = nullptr;
-        options_ = Options();
-
-        options_.block_restart_interval = args.restart_interval;
-        // Use shorter block size for tests to exercise block boundary
-        // conditions more.
-        options_.block_size = 256;
-        if (args.reverse_compare) {
-          options_.comparator = &reverse_key_comparator;
-        }
-        switch (args.type) {
-          case TABLE_TEST:
-            constructor_ = new TableConstructor(options_.comparator);
-            break;
-          case BLOCK_TEST:
-            constructor_ = new BlockConstructor(options_.comparator);
-            break;
-          case MEMTABLE_TEST:
-            constructor_ = new MemTableConstructor(options_.comparator);
-            break;
-          case DB_TEST:
-            constructor_ = new DBConstructor(options_.comparator);
-            break;
-        }
-        */
         trace!(
             target: "bitcoinleveldb_harness",
             label = "bitcoinleveldb_harness.harness.init.entry",
@@ -55,18 +28,22 @@ impl Harness {
 
         // if (args.reverse_compare) { options_.comparator = &reverse_key_comparator; }
         if args.reverse_compare {
-            let reverse_cmp: Arc<dyn Comparator> = bitcoinleveldb_harness_reverse_bytewise_comparator();
+            let reverse_cmp: Arc<dyn SliceComparator> =
+                bitcoinleveldb_harness_reverse_bytewise_comparator();
             self.options.set_comparator(reverse_cmp);
+
+            let comparator_name: Cow<'_, str> = self.options.comparator().name();
             debug!(
                 target: "bitcoinleveldb_harness",
                 label = "bitcoinleveldb_harness.harness.init.reverse_comparator.enabled",
-                comparator_name = self.options.comparator().name(),
+                comparator_name = comparator_name.as_ref(),
             );
         } else {
+            let comparator_name: Cow<'_, str> = self.options.comparator().name();
             debug!(
                 target: "bitcoinleveldb_harness",
                 label = "bitcoinleveldb_harness.harness.init.reverse_comparator.disabled",
-                comparator_name = self.options.comparator().name(),
+                comparator_name = comparator_name.as_ref(),
             );
         }
 
@@ -130,6 +107,19 @@ impl Harness {
                     constructor_kind = "db",
                 );
 
+                trace!(
+                    target: "bitcoinleveldb_harness",
+                    label = "bitcoinleveldb_harness.harness.init.db_test_execution_guard.acquire.begin",
+                );
+
+                self.db_test_execution_guard =
+                    Some(bitcoinleveldb_harness_acquire_db_test_execution_guard());
+
+                trace!(
+                    target: "bitcoinleveldb_harness",
+                    label = "bitcoinleveldb_harness.harness.init.db_test_execution_guard.acquire.end",
+                );
+
                 let cmp_box: Box<dyn SliceComparator> =
                     bitcoinleveldb_harness_slice_comparator_box_from_options(&self.options);
 
@@ -146,6 +136,7 @@ impl Harness {
             label = "bitcoinleveldb_harness.harness.init.exit",
             ty = bitcoinleveldb_harness_test_type_machine_label(&args.ty),
             constructor_tagged = (self.constructor as usize),
+            db_test_execution_guard_held = self.db_test_execution_guard.is_some(),
         );
     }
 }

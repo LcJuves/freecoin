@@ -4,50 +4,61 @@ crate::ix!();
 pub fn leveldb_create_default_env() -> *mut LevelDBEnv {
     trace!(target: "bitcoinleveldb_db::c_api", "leveldb_create_default_env entry");
 
-    let default_opts = Options::default();
+    let env = PosixEnv::shared();
+    let default_opts = Options::with_env(env);
 
     let env_rc = match default_opts.env().as_ref() {
         Some(e) => e.clone(),
         None => {
-            error!(target: "bitcoinleveldb_db::c_api", "Options::default() did not provide a default env");
+            error!(
+                target: "bitcoinleveldb_db::c_api",
+                "Options::default() did not provide a default env"
+            );
             return core::ptr::null_mut();
         }
     };
 
-    let result = Box::new(LevelDBEnv {
-        rep: env_rc,
-        is_default: true,
-    });
+    let result = Box::new(LevelDBEnvBuilder::default()
+        .rep(env_rc)
+        .is_default(true)
+        .build()
+        .unwrap()
+    );
 
     let p = Box::into_raw(result);
 
-    trace!(target: "bitcoinleveldb_db::c_api", "leveldb_create_default_env exit"; "ptr" => (p as usize));
+    trace!(
+        target: "bitcoinleveldb_db::c_api",
+        ptr = (p as usize),
+        "leveldb_create_default_env exit"
+    );
     p
-
-    /*
-        leveldb_env_t* result = new leveldb_env_t;
-      result->rep = Env::Default();
-      result->is_default = true;
-      return result;
-    */
 }
 
 pub fn leveldb_env_destroy(env: *mut LevelDBEnv) {
-    trace!(target: "bitcoinleveldb_db::c_api", "leveldb_env_destroy entry"; "env_is_null" => env.is_null());
+    trace!(
+        target: "bitcoinleveldb_db::c_api",
+        env_is_null = env.is_null(),
+        "leveldb_env_destroy entry"
+    );
 
     unsafe {
         if env.is_null() {
-            warn!(target: "bitcoinleveldb_db::c_api", "leveldb_env_destroy called with null env");
+            warn!(
+                target: "bitcoinleveldb_db::c_api",
+                "leveldb_env_destroy called with null env"
+            );
             return;
         }
 
-        // Preserve default env semantics: the default env is treated as process-lifetime.
-        // We do this by leaking one clone when destroying a default handle.
         let boxed = Box::from_raw(env);
-        if boxed.is_default {
-            let leaked = boxed.rep.clone();
+        if boxed.is_default().to_owned() {
+            let leaked = boxed.rep().clone();
             core::mem::forget(leaked);
-            trace!(target: "bitcoinleveldb_db::c_api", "leveldb_env_destroy leaked one Rc clone to keep default env alive");
+            trace!(
+                target: "bitcoinleveldb_db::c_api",
+                "leveldb_env_destroy leaked one Rc clone to keep default env alive"
+            );
         }
 
         drop(boxed);
@@ -55,29 +66,36 @@ pub fn leveldb_env_destroy(env: *mut LevelDBEnv) {
 
     trace!(target: "bitcoinleveldb_db::c_api", "leveldb_env_destroy exit");
 
-    /*
-        if (!env->is_default) delete env->rep;
-      delete env;
-    */
 }
 
 pub fn leveldb_env_get_test_directory(env: *mut LevelDBEnv) -> *mut u8 {
-    trace!(target: "bitcoinleveldb_db::c_api", "leveldb_env_get_test_directory entry"; "env_is_null" => env.is_null());
+    trace!(
+        target: "bitcoinleveldb_db::c_api",
+        env_is_null = env.is_null(),
+        "leveldb_env_get_test_directory entry"
+    );
 
     unsafe {
         if env.is_null() {
-            error!(target: "bitcoinleveldb_db::c_api", "leveldb_env_get_test_directory received null env");
+            error!(
+                target: "bitcoinleveldb_db::c_api",
+                "leveldb_env_get_test_directory received null env"
+            );
             return core::ptr::null_mut();
         }
 
         let mut result: String = String::new();
         let status = (*env)
-            .rep
+            .rep()
             .borrow_mut()
             .get_test_directory((&mut result) as *mut String);
 
         if !status.is_ok() {
-            warn!(target: "bitcoinleveldb_db::c_api", "GetTestDirectory failed"; "status" => %status.to_string());
+            warn!(
+                target: "bitcoinleveldb_db::c_api",
+                status = %status.to_string(),
+                "GetTestDirectory failed"
+            );
             return core::ptr::null_mut();
         }
 
@@ -86,7 +104,11 @@ pub fn leveldb_env_get_test_directory(env: *mut LevelDBEnv) -> *mut u8 {
 
         let buffer = libc::malloc(len + 1) as *mut u8;
         if buffer.is_null() {
-            error!(target: "bitcoinleveldb_db::c_api", "malloc failed for test directory buffer"; "len" => len + 1);
+            error!(
+                target: "bitcoinleveldb_db::c_api",
+                len = (len + 1),
+                "malloc failed for test directory buffer"
+            );
             return core::ptr::null_mut();
         }
 
@@ -95,20 +117,72 @@ pub fn leveldb_env_get_test_directory(env: *mut LevelDBEnv) -> *mut u8 {
         }
         *buffer.add(len) = 0;
 
-        trace!(target: "bitcoinleveldb_db::c_api", "leveldb_env_get_test_directory exit"; "len" => len, "ptr" => (buffer as usize));
+        trace!(
+            target: "bitcoinleveldb_db::c_api",
+            len = len,
+            ptr = (buffer as usize),
+            "leveldb_env_get_test_directory exit"
+        );
 
         buffer
     }
 
-    /*
-        std::string result;
-      if (!env->rep->GetTestDirectory(&result).ok()) {
-        return nullptr;
-      }
+}
 
-      char* buffer = static_cast<char*>(malloc(result.size() + 1));
-      memcpy(buffer, result.data(), result.size());
-      buffer[result.size()] = '\0';
-      return buffer;
-    */
+#[cfg(test)]
+mod bitcoinleveldb_db__leveldb_env_rs__exhaustive_test_suite {
+    use super::*;
+
+    #[traced_test]
+    fn bitcoinleveldb_db__leveldb_env_rs__create_default_env_and_destroy_is_safe() {
+        unsafe {
+            let env: *mut LevelDBEnv = leveldb_create_default_env();
+            assert!(!env.is_null());
+            leveldb_env_destroy(env);
+        }
+    }
+
+    #[traced_test]
+    fn bitcoinleveldb_db__leveldb_env_rs__env_get_test_directory_null_env_returns_null() {
+        unsafe {
+            let p: *mut u8 = leveldb_env_get_test_directory(core::ptr::null_mut());
+            assert!(p.is_null());
+        }
+    }
+
+    #[traced_test]
+    fn bitcoinleveldb_db__leveldb_env_rs__env_get_test_directory_returns_nul_terminated_string_when_ok() {
+        unsafe {
+            let env: *mut LevelDBEnv = leveldb_create_default_env();
+            assert!(!env.is_null());
+
+            let p: *mut u8 = leveldb_env_get_test_directory(env);
+            assert!(!p.is_null());
+
+            let mut found_nul: bool = false;
+            let mut i: usize = 0usize;
+            while i < 4096usize {
+                let b: u8 = *p.add(i);
+                if b == 0u8 {
+                    found_nul = true;
+                    break;
+                }
+                i = i + 1;
+            }
+
+            assert!(found_nul);
+
+            crate::leveldb_free::leveldb_free(p as *mut core::ffi::c_void);
+
+            leveldb_env_destroy(env);
+        }
+    }
+
+    #[traced_test]
+    fn bitcoinleveldb_db__leveldb_env_rs__destroy_null_env_is_safe() {
+        unsafe {
+            leveldb_env_destroy(core::ptr::null_mut());
+        }
+        assert!(true);
+    }
 }

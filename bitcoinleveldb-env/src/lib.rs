@@ -3,6 +3,7 @@
 //-------------------------------------------[.cpp/bitcoin/src/leveldb/include/leveldb/env.h]
 #[macro_use] mod imports; use imports::*;
 
+x!{global_state}
 x!{env_wrapper}
 x!{get_test_directory}
 x!{interface}

@@ -129,16 +129,16 @@ impl VersionSetBuilder {
                     let bpos: usize = lo;
 
                     for i in base_index..bpos {
-                        self.maybe_add_file(v, level, base_files[i]);
+                        self.maybe_add_level_file(v, level, base_files[i]);
                     }
                     base_index = bpos;
 
-                    self.maybe_add_file(v, level, added_file);
+                    self.maybe_add_level_file(v, level, added_file);
                 }
 
                 // Add remaining base files
                 for i in base_index..base_end {
-                    self.maybe_add_file(v, level, base_files[i]);
+                    self.maybe_add_level_file(v, level, base_files[i]);
                 }
 
                 // Debug-only: verify no overlap in levels > 0
@@ -234,69 +234,10 @@ impl VersionSetBuilder {
 #[cfg(test)]
 mod version_set_builder_save_to_exhaustive_test_suite {
     use super::*;
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
-    use tracing::{debug, error, info, trace, warn};
-
-    fn make_unique_temp_db_dir(prefix: &str) -> PathBuf {
-        let pid = std::process::id();
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-
-        let mut p = std::env::temp_dir();
-        p.push(format!("{prefix}_{pid}_{nanos}"));
-        p
-    }
-
-    fn remove_dir_all_best_effort(dir: &Path) {
-        match std::fs::remove_dir_all(dir) {
-            Ok(()) => trace!(dir = %dir.display(), "removed temp db dir"),
-            Err(e) => warn!(dir = %dir.display(), error = ?e, "failed to remove temp db dir (best effort)"),
-        }
-    }
-
-    fn assert_status_ok(st: &Status, context: &'static str) {
-        if !st.is_ok() {
-            error!(?st, context, "unexpected non-ok Status");
-            panic!("unexpected non-ok Status in {context}");
-        }
-        trace!(context, "Status OK");
-    }
-
-    fn make_ikey(user_key: &str, seq: u64) -> InternalKey {
-        InternalKey::new(&Slice::from(user_key), seq, ValueType::TypeValue)
-    }
-
-    fn make_internal_key_comparator_from_options(options: &Options) -> InternalKeyComparator {
-        let ucmp_ptr: *const dyn SliceComparator =
-            options.comparator().as_ref() as *const dyn SliceComparator;
-        InternalKeyComparator::new(ucmp_ptr)
-    }
-
-    struct RawMutexTestGuard {
-        mu: *mut RawMutex,
-    }
-
-    impl RawMutexTestGuard {
-        fn lock(mu: *mut RawMutex) -> Self {
-            trace!(mu_ptr = %format!("{:p}", mu), "RawMutexTestGuard::lock");
-            unsafe { (*mu).lock() };
-            Self { mu }
-        }
-    }
-
-    impl Drop for RawMutexTestGuard {
-        fn drop(&mut self) {
-            trace!(mu_ptr = %format!("{:p}", self.mu), "RawMutexTestGuard::drop (unlock)");
-            unsafe { (*self.mu).unlock() };
-        }
-    }
 
     #[traced_test]
     fn save_to_merges_base_and_added_files_in_key_order_and_respects_deletions() {
-        let dir = make_unique_temp_db_dir("versionset_builder_save_to_merge");
+        let dir = build_unique_temporary_database_directory_path("versionset_builder_save_to_merge");
         std::fs::create_dir_all(&dir).unwrap();
         let dbname = dir.to_string_lossy().to_string();
 
@@ -305,7 +246,7 @@ mod version_set_builder_save_to_exhaustive_test_suite {
         options.set_create_if_missing(true);
         options.set_error_if_exists(false);
 
-        let icmp = Box::new(make_internal_key_comparator_from_options(options.as_ref()));
+        let icmp = Box::new(build_internal_key_comparator_from_database_options(options.as_ref()));
         let mut table_cache = Box::new(TableCache::new(&dbname, options.as_ref(), 128));
         let mut mu = Box::new(RawMutex::INIT);
 
@@ -318,23 +259,23 @@ mod version_set_builder_save_to_exhaustive_test_suite {
 
         let mut save_manifest: bool = false;
         let st0 = vs.recover(&mut save_manifest as *mut bool);
-        assert_status_ok(&st0, "recover");
+        assert_status_is_ok_or_panic(&st0, "recover");
 
-        let _guard = RawMutexTestGuard::lock(mu.as_mut() as *mut RawMutex);
+        let _guard = RawMutexExclusiveTestGuard::acquire_from_raw_mutex(mu.as_mut() as *mut RawMutex);
 
         // Build a base state with two L1 files: A=[a,c], C=[g,i]
         let f_a = vs.new_file_number();
         let mut e_a = VersionEdit::default();
-        e_a.add_file(1, f_a, 10, &make_ikey("a", 1), &make_ikey("c", 1));
-        assert_status_ok(
+        e_a.add_file(1, f_a, 10, &make_value_internal_key_for_user_key("a", 1), &make_value_internal_key_for_user_key("c", 1));
+        assert_status_is_ok_or_panic(
             &vs.log_and_apply(&mut e_a as *mut VersionEdit, mu.as_mut() as *mut RawMutex),
             "log_and_apply base A",
         );
 
         let f_c = vs.new_file_number();
         let mut e_c = VersionEdit::default();
-        e_c.add_file(1, f_c, 10, &make_ikey("g", 1), &make_ikey("i", 1));
-        assert_status_ok(
+        e_c.add_file(1, f_c, 10, &make_value_internal_key_for_user_key("g", 1), &make_value_internal_key_for_user_key("i", 1));
+        assert_status_is_ok_or_panic(
             &vs.log_and_apply(&mut e_c as *mut VersionEdit, mu.as_mut() as *mut RawMutex),
             "log_and_apply base C",
         );
@@ -347,7 +288,7 @@ mod version_set_builder_save_to_exhaustive_test_suite {
 
         let f_b = vs.new_file_number();
         let mut edit = VersionEdit::default();
-        edit.add_file(1, f_b, 10, &make_ikey("d", 1), &make_ikey("f", 1));
+        edit.add_file(1, f_b, 10, &make_value_internal_key_for_user_key("d", 1), &make_value_internal_key_for_user_key("f", 1));
         builder.apply(&mut edit as *mut VersionEdit);
 
         let vs_ptr: *mut VersionSet = vs.as_mut() as *mut VersionSet;
@@ -392,6 +333,6 @@ mod version_set_builder_save_to_exhaustive_test_suite {
         // Best-effort cleanup: avoid assuming Version drop/unref details in unit tests.
         let _ = (out_ptr, out_ptr2);
 
-        remove_dir_all_best_effort(&dir);
+        remove_directory_tree_best_effort(&dir);
     }
 }

@@ -17,7 +17,6 @@ impl Drop for VersionSet {
                 "VersionSet::drop: initial state"
             );
 
-            // Unref the current version first (while the sentinel is still intact).
             if !cur.is_null() {
                 debug!(
                     current_ptr = %format!("{:p}", cur),
@@ -27,11 +26,6 @@ impl Drop for VersionSet {
                 self.set_current(core::ptr::null_mut());
             }
 
-            // If the version list is not empty, detach the dummy sentinel by bypassing it:
-            // head.prev = tail; tail.next = head; then dummy.next = dummy; dummy.prev = dummy.
-            //
-            // This prevents any later Version drops from touching `dummy_versions_` after `VersionSet`
-            // is gone, which would otherwise be a use-after-free.
             if !dummy_ptr.is_null() {
                 let head: *mut Version = *(*dummy_ptr).next();
                 let tail: *mut Version = *(*dummy_ptr).prev();
@@ -53,11 +47,9 @@ impl Drop for VersionSet {
                         "VersionSet::drop: detaching dummy sentinel from non-empty version list"
                     );
 
-                    // Bypass dummy: connect tail <-> head.
                     (*head).set_prev(tail);
                     (*tail).set_next(head);
 
-                    // Now isolate the sentinel.
                     (*dummy_ptr).set_next(dummy_ptr);
                     (*dummy_ptr).set_prev(dummy_ptr);
 
@@ -71,7 +63,6 @@ impl Drop for VersionSet {
                 );
             }
 
-            // Drop MANIFEST log writer first (it borrows descriptor_file via BorrowedWritableFileForManifest).
             let dlog: *mut LogWriter = self.descriptor_log();
             if !dlog.is_null() {
                 debug!(
@@ -82,7 +73,6 @@ impl Drop for VersionSet {
                 self.set_descriptor_log(core::ptr::null_mut());
             }
 
-            // Drop MANIFEST file.
             let dfile: *mut dyn WritableFile = self.descriptor_file();
             if !dfile.is_null() {
                 debug!(
@@ -101,131 +91,58 @@ impl Drop for VersionSet {
 #[cfg(test)]
 mod version_set_drop_exhaustive_test_suite {
     use super::*;
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
-    use tracing::{debug, error, info, trace, warn};
-
-    fn make_unique_temp_db_dir(prefix: &str) -> PathBuf {
-        let pid = std::process::id();
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-
-        let mut p = std::env::temp_dir();
-        p.push(format!("{prefix}_{pid}_{nanos}"));
-        p
-    }
-
-    fn remove_dir_all_best_effort(dir: &Path) {
-        match std::fs::remove_dir_all(dir) {
-            Ok(()) => trace!(dir = %dir.display(), "removed temp db dir"),
-            Err(e) => warn!(dir = %dir.display(), error = ?e, "failed to remove temp db dir (best effort)"),
-        }
-    }
-
-    fn assert_status_ok(st: &Status, context: &'static str) {
-        if !st.is_ok() {
-            error!(?st, context, "unexpected non-ok Status");
-            panic!("unexpected non-ok Status in {context}");
-        }
-        trace!(context, "Status OK");
-    }
-
-    fn make_internal_key_comparator_from_options(options: &Options) -> InternalKeyComparator {
-        let ucmp_ptr: *const dyn SliceComparator =
-            options.comparator().as_ref() as *const dyn SliceComparator;
-        InternalKeyComparator::new(ucmp_ptr)
-    }
-
-    struct VersionSetDropHarness {
-        dir: PathBuf,
-        dbname: Box<String>,
-        options: Box<Options>,
-        icmp: Box<InternalKeyComparator>,
-        table_cache: Box<TableCache>,
-        versionset: Option<Box<VersionSet>>,
-    }
-
-    impl VersionSetDropHarness {
-        fn new(prefix: &str) -> Self {
-            let dir = make_unique_temp_db_dir(prefix);
-            std::fs::create_dir_all(&dir).unwrap();
-
-            let dbname = Box::new(dir.to_string_lossy().to_string());
-
-            let env = PosixEnv::shared();
-            let mut options = Box::new(Options::with_env(env));
-            options.set_create_if_missing(true);
-            options.set_error_if_exists(false);
-
-            let icmp = Box::new(make_internal_key_comparator_from_options(options.as_ref()));
-
-            let mut table_cache = Box::new(TableCache::new(dbname.as_ref(), options.as_ref(), 64));
-
-            let versionset = VersionSet::new(
-                dbname.as_ref(),
-                options.as_ref(),
-                table_cache.as_mut() as *mut TableCache,
-                icmp.as_ref() as *const InternalKeyComparator,
-            );
-
-            Self {
-                dir,
-                dbname,
-                options,
-                icmp,
-                table_cache,
-                versionset: Some(versionset),
-            }
-        }
-
-        fn recover(&mut self) -> Status {
-            let vs = self.versionset.as_mut().unwrap();
-            let mut save_manifest: bool = false;
-            let st = vs.recover(&mut save_manifest as *mut bool);
-            info!(save_manifest, status = ?st, "recover completed");
-            st
-        }
-
-        fn drop_versionset_now(&mut self) {
-            let _ = self.versionset.take();
-        }
-    }
 
     #[traced_test]
-    fn drop_releases_manifest_lock_allowing_immediate_reopen() {
-        let mut h1 = VersionSetDropHarness::new("versionset_drop_lock_release");
-        let st1 = h1.recover();
-        assert_status_ok(&st1, "first recover");
+    fn version_set_drop_releases_resources_without_destroying_database_directory_before_reopen() {
+        let mut harness =
+            VersionSetDropLifecycleScenarioHarness::open_for_test_prefix(
+                "versionset_drop_acquire_from_raw_mutex_release",
+            );
 
-        let dir = h1.dir.clone();
-        let dbname = h1.dbname.clone();
+        let status = harness.recover_into_current_version_set();
+        assert_status_is_ok_or_panic(&status, "first recover");
 
-        h1.drop_versionset_now();
-        drop(h1);
+        let dir = harness.database_directory_path().to_path_buf();
+        let dbname = harness.database_name().to_string();
+
+        // Only drop VersionSet — NOT the harness (which owns directory)
+        harness.drop_version_set_instance();
+
+        // DO NOT drop harness here
 
         let env = PosixEnv::shared();
         let mut options = Box::new(Options::with_env(env));
         options.set_create_if_missing(false);
         options.set_error_if_exists(false);
 
-        let icmp = Box::new(make_internal_key_comparator_from_options(options.as_ref()));
+        let icmp = Box::new(
+            build_internal_key_comparator_from_database_options(options.as_ref()),
+        );
 
-        let mut table_cache = Box::new(TableCache::new(dbname.as_ref(), options.as_ref(), 64));
+        let mut table_cache = Box::new(TableCache::new(&dbname, options.as_ref(), 64));
 
-        let mut vs2 = VersionSet::new(
-            dbname.as_ref(),
+        let mut versionset = VersionSet::new(
+            &dbname,
             options.as_ref(),
             table_cache.as_mut() as *mut TableCache,
             icmp.as_ref() as *const InternalKeyComparator,
         );
 
-        let mut save_manifest: bool = false;
-        let st2 = vs2.recover(&mut save_manifest as *mut bool);
-        debug!(save_manifest, status = ?st2, "second recover after drop");
-        assert_status_ok(&st2, "second recover");
+        let mut save_manifest = false;
+        let reopen_status = versionset.recover(&mut save_manifest as *mut bool);
 
-        remove_dir_all_best_effort(&dir);
+        debug!(
+            save_manifest,
+            status = ?reopen_status,
+            "second recover after drop"
+        );
+
+        assert_status_is_ok_or_panic(&reopen_status, "second recover");
+
+        // NOW cleanup
+        drop(versionset);
+        drop(harness);
+
+        remove_directory_tree_best_effort(dir.as_path());
     }
 }

@@ -3,6 +3,7 @@
 #[macro_use] mod imports; use imports::*;
 
 x!{borrowed_writable_file_for_manifest}
+x!{compare_file_meta_data_by_smallest_internal_key}
 x!{current_version}
 x!{get_current_log_file_number}
 x!{get_internal_key_comparator}
@@ -20,21 +21,21 @@ x!{next_file_number}
 x!{num_level_files}
 x!{reuse_file_number}
 x!{set_last_sequence_number}
-x!{version_set}
-x!{version_set_into_version}
+x!{trace}
 x!{version_set_add_live_files}
 x!{version_set_append_version}
 x!{version_set_approximate_offset_of}
-x!{version_set_builder}
 x!{version_set_builder_apply}
 x!{version_set_builder_drop}
-x!{version_set_builder_maybe_add_file}
+x!{version_set_builder_maybe_add_level_file}
 x!{version_set_builder_save_to}
+x!{version_set_builder}
 x!{version_set_compact_range}
 x!{version_set_create}
 x!{version_set_drop}
 x!{version_set_finalize}
 x!{version_set_get_range}
+x!{version_set_into_version}
 x!{version_set_log_and_apply}
 x!{version_set_make_input_iterator}
 x!{version_set_max_next_level_overlapping_bytes}
@@ -45,5 +46,18 @@ x!{version_set_recover}
 x!{version_set_reuse_manifest}
 x!{version_set_setup_other_inputs}
 x!{version_set_write_snapshot}
-x!{compare_file_meta_data_by_smallest_internal_key}
-x!{trace}
+x!{version_set}
+
+xt!{t_algorithm_scenario_harness}
+xt!{t_compaction_scenario_harness}
+xt!{t_create_scenario_harness}
+xt!{t_drop_scenario_harness}
+xt!{t_recovery_scenario_harness}
+xt!{t_temporary_database_harness}
+xt!{t_version_set_compaction_behavior_specifications}
+xt!{t_version_set_layout_invariant_specifications}
+xt!{t_version_set_pick_compaction_selection_specifications}
+xt!{t_version_set_setup_other_inputs_boundary_specifications}
+xt!{t_version_set_setup_other_inputs_expansion_decision_specifications}
+xt!{t_version_get_probe_support}
+xt!{t_version_get_visibility_specifications}

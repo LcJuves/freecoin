@@ -8,6 +8,8 @@ struct VersionSetRecoverCorruptionReporter {
 impl bitcoinleveldb_logreader::LogReaderReporter for VersionSetRecoverCorruptionReporter {
     fn corruption(&mut self, bytes: usize, st: &Status) {
         warn!(
+            target: "bitcoinleveldb_versionset::recover",
+            event = "versionset_recover_manifest_corruption",
             bytes,
             status = %st.to_string(),
             "VersionSet::recover: log corruption reported"
@@ -25,8 +27,11 @@ impl Recover for VersionSet {
     /// Recover the last saved descriptor from persistent storage.
     fn recover(&mut self, save_manifest: *mut bool) -> Status {
         trace!(
-            "VersionSet::recover: enter; save_manifest_ptr={:p}",
-            save_manifest
+            target: "bitcoinleveldb_versionset::recover",
+            event = "versionset_recover_entry",
+            dbname = %self.dbname(),
+            save_manifest_ptr = save_manifest as usize,
+            "VersionSet::recover: enter"
         );
 
         assert!(
@@ -38,12 +43,19 @@ impl Recover for VersionSet {
             *save_manifest = false;
         }
 
-        let env_rc = unsafe {
-            (*self.options())
-                .env()
-                .as_ref()
-                .expect("VersionSet::recover: Options.env is None")
-                .clone()
+        let env_rc = match unsafe { (*self.options()).env().as_ref() } {
+            Some(env) => env.clone(),
+            None => {
+                error!(
+                    target: "bitcoinleveldb_versionset::recover",
+                    event = "versionset_recover_missing_env",
+                    dbname = %self.dbname(),
+                    "VersionSet::recover: Options.env is None"
+                );
+
+                let msg = Slice::from("VersionSet::recover: Options.env is None");
+                return Status::corruption(&msg, None);
+            }
         };
 
         let mut current: String = String::new();
@@ -52,10 +64,22 @@ impl Recover for VersionSet {
         let mut s =
             read_file_to_string(env_rc.clone(), &current_name, &mut current as *mut String);
 
+        tracing::debug!(
+            target: "bitcoinleveldb_versionset::recover",
+            event = "versionset_recover_read_current",
+            dbname = %self.dbname(),
+            current_name = %current_name,
+            status_ok = s.is_ok(),
+            status = %s.to_string(),
+            "VersionSet::recover: read CURRENT"
+        );
+
         if !s.is_ok() {
             let create_if_missing = unsafe { *(*self.options()).create_if_missing() };
             if s.is_not_found() && create_if_missing {
                 info!(
+                    target: "bitcoinleveldb_versionset::recover",
+                    event = "versionset_recover_current_missing_create_manifest",
                     dbname = %self.dbname(),
                     "VersionSet::recover: CURRENT missing and create_if_missing=true; creating new manifest"
                 );
@@ -72,12 +96,26 @@ impl Recover for VersionSet {
                 let mut file_box_ptr: *mut Box<dyn WritableFile> = core::ptr::null_mut();
                 s = env_rc.borrow_mut().new_writable_file(&manifest, &mut file_box_ptr);
 
+                tracing::info!(
+                    target: "bitcoinleveldb_versionset::recover",
+                    event = "versionset_recover_create_initial_manifest",
+                    dbname = %self.dbname(),
+                    manifest = %manifest,
+                    status_ok = s.is_ok(),
+                    status = %s.to_string(),
+                    "VersionSet::recover: create initial MANIFEST"
+                );
+
                 if !s.is_ok() {
                     error!(
+                        target: "bitcoinleveldb_versionset::recover",
+                        event = "versionset_recover_create_initial_manifest_failure",
+                        dbname = %self.dbname(),
                         manifest = %manifest,
                         status = %s.to_string(),
                         "VersionSet::recover: failed to create initial MANIFEST"
                     );
+
                     return s;
                 }
 
@@ -93,8 +131,10 @@ impl Recover for VersionSet {
                 };
 
                 trace!(
+                    target: "bitcoinleveldb_versionset::recover",
+                    event = "versionset_recover_initial_manifest_file_created",
                     manifest = %manifest,
-                    raw_file_ptr = %format!("{:p}", raw_file),
+                    raw_file_ptr = (raw_file as *mut ()) as usize,
                     "VersionSet::recover: created initial MANIFEST writable file"
                 );
 
@@ -111,7 +151,11 @@ impl Recover for VersionSet {
                     snap_status = <VersionSet as WriteSnapshot>::write_snapshot(self, &mut lw);
 
                     trace!(
-                        ok = snap_status.is_ok(),
+                        target: "bitcoinleveldb_versionset::recover",
+                        event = "versionset_recover_initial_write_snapshot",
+                        dbname = %self.dbname(),
+                        manifest = %manifest,
+                        status_ok = snap_status.is_ok(),
                         status = %snap_status.to_string(),
                         "VersionSet::recover: write_snapshot into initial MANIFEST"
                     );
@@ -120,7 +164,11 @@ impl Recover for VersionSet {
                         sync_status = unsafe { (*raw_file).sync() };
 
                         trace!(
-                            ok = sync_status.is_ok(),
+                            target: "bitcoinleveldb_versionset::recover",
+                            event = "versionset_recover_initial_manifest_sync",
+                            dbname = %self.dbname(),
+                            manifest = %manifest,
+                            status_ok = sync_status.is_ok(),
                             status = %sync_status.to_string(),
                             "VersionSet::recover: synced initial MANIFEST"
                         );
@@ -128,7 +176,10 @@ impl Recover for VersionSet {
 
                     // `lw` (and its borrowed wrapper) MUST drop before we free `raw_file`.
                     trace!(
-                        raw_file_ptr = %format!("{:p}", raw_file),
+                        target: "bitcoinleveldb_versionset::recover",
+                        event = "versionset_recover_initial_manifest_drop_writer",
+                        dbname = %self.dbname(),
+                        raw_file_ptr = (raw_file as *mut ()) as usize,
                         "VersionSet::recover: dropping temporary LogWriter before freeing MANIFEST file"
                     );
                 }
@@ -138,20 +189,51 @@ impl Recover for VersionSet {
                 }
 
                 if !snap_status.is_ok() {
+                    tracing::error!(
+                        "[versionset-recover-live] event=versionset_recover_initial_write_snapshot_failure dbname='{}' manifest='{}' status='{}'",
+                        self.dbname(),
+                        manifest,
+                        snap_status.to_string(),
+                    );
                     return snap_status;
                 }
 
                 if !sync_status.is_ok() {
+                    tracing::error!(
+                        "[versionset-recover-live] event=versionset_recover_initial_manifest_sync_failure dbname='{}' manifest='{}' status='{}'",
+                        self.dbname(),
+                        manifest,
+                        sync_status.to_string(),
+                    );
                     return sync_status;
                 }
 
                 let cur_status =
                     set_current_file(env_rc.clone(), self.dbname(), self.manifest_file_number());
+
+                tracing::info!(
+                    target: "bitcoinleveldb_versionset::recover",
+                    event = "versionset_recover_set_current_initial_manifest",
+                    dbname = %self.dbname(),
+                    manifest_file_number = self.manifest_file_number(),
+                    status_ok = cur_status.is_ok(),
+                    status = %cur_status.to_string(),
+                    "VersionSet::recover: set CURRENT for initial MANIFEST"
+                );
+
                 if !cur_status.is_ok() {
                     return cur_status;
                 }
 
-                trace!("VersionSet::recover: created new CURRENT+MANIFEST; exit ok");
+                trace!(
+                    target: "bitcoinleveldb_versionset::recover",
+                    event = "versionset_recover_created_new_manifest_exit",
+                    dbname = %self.dbname(),
+                    status_ok = true,
+                    save_manifest = unsafe { *save_manifest },
+                    "VersionSet::recover: created new CURRENT+MANIFEST; exit ok"
+                );
+
                 return Status::ok();
             }
 
@@ -168,6 +250,17 @@ impl Recover for VersionSet {
 
         let mut file_ptr: *mut Box<dyn SequentialFile> = core::ptr::null_mut();
         s = env_rc.borrow_mut().new_sequential_file(&dscname, &mut file_ptr);
+
+        tracing::info!(
+            target: "bitcoinleveldb_versionset::recover",
+            event = "versionset_recover_open_manifest",
+            dbname = %self.dbname(),
+            descriptor = %dscname,
+            status_ok = s.is_ok(),
+            status = %s.to_string(),
+            file_ptr = file_ptr as usize,
+            "VersionSet::recover: opened descriptor file"
+        );
 
         if !s.is_ok() {
             if s.is_not_found() {
@@ -188,6 +281,8 @@ impl Recover for VersionSet {
         let mut last_sequence: u64 = 0;
         let mut log_number: u64 = 0;
         let mut prev_log_number: u64 = 0;
+        let mut manifest_records_seen: u64 = 0;
+        let mut manifest_edits_applied: u64 = 0;
 
         let mut builder = VersionSetBuilder::new(self, self.current());
 
@@ -218,6 +313,21 @@ impl Recover for VersionSet {
             let mut scratch: Vec<u8> = Vec::new();
 
             while reader.read_record(&mut record, &mut scratch) && s.is_ok() {
+                manifest_records_seen = manifest_records_seen.saturating_add(1);
+
+                if manifest_records_seen == 1 || (manifest_records_seen % 64) == 0 {
+                    tracing::debug!(
+                        target: "bitcoinleveldb_versionset::recover",
+                        event = "versionset_recover_manifest_progress",
+                        dbname = %self.dbname(),
+                        descriptor = %dscname,
+                        manifest_records_seen,
+                        manifest_edits_applied,
+                        "VersionSet::recover: manifest replay progress"
+                    );
+
+                }
+
                 let mut edit = VersionEdit::default();
                 s = edit.decode_from(&record);
 
@@ -248,6 +358,7 @@ impl Recover for VersionSet {
 
                 if s.is_ok() {
                     builder.apply(&mut edit as *mut VersionEdit);
+                    manifest_edits_applied = manifest_edits_applied.saturating_add(1);
                 }
 
                 if *edit.has_log_number() {
@@ -271,6 +382,26 @@ impl Recover for VersionSet {
                 }
             }
         }
+
+        tracing::info!(
+            target: "bitcoinleveldb_versionset::recover",
+            event = "versionset_recover_manifest_replay_summary",
+            dbname = %self.dbname(),
+            descriptor = %dscname,
+            status_ok = s.is_ok(),
+            status = %s.to_string(),
+            manifest_records_seen,
+            manifest_edits_applied,
+            have_log_number,
+            have_prev_log_number,
+            have_next_file,
+            have_last_sequence,
+            next_file,
+            last_sequence,
+            log_number,
+            prev_log_number,
+            "VersionSet::recover: manifest replay summary"
+        );
 
         if s.is_ok() {
             if !have_next_file {
@@ -299,20 +430,33 @@ impl Recover for VersionSet {
             let v_files: [Vec<*mut FileMetaData>; NUM_LEVELS] =
                 core::array::from_fn(|_| Vec::new());
 
-            let v_ptr: *mut Version = Box::into_raw(Box::new(
-                VersionBuilder::default()
-                    .vset(vset_iface_ptr)
-                    .next(core::ptr::null_mut())
-                    .prev(core::ptr::null_mut())
-                    .refs(0)
-                    .files(v_files)
-                    .file_to_compact(core::ptr::null_mut())
-                    .file_to_compact_level(-1)
-                    .compaction_score(-1.0)
-                    .compaction_level(-1)
-                    .build()
-                    .unwrap(),
-            ));
+            let built_version = VersionBuilder::default()
+                .vset(vset_iface_ptr)
+                .next(core::ptr::null_mut())
+                .prev(core::ptr::null_mut())
+                .refs(0)
+                .files(v_files)
+                .file_to_compact(core::ptr::null_mut())
+                .file_to_compact_level(-1)
+                .compaction_score(-1.0)
+                .compaction_level(-1)
+                .build();
+
+            let v_ptr: *mut Version = match built_version {
+                Ok(v) => Box::into_raw(Box::new(v)),
+                Err(build_error) => {
+                    error!(
+                        target: "bitcoinleveldb_versionset::recover",
+                        event = "versionset_recover_build_version_failure",
+                        dbname = %self.dbname(),
+                        error = ?build_error,
+                        "VersionSet::recover: failed to build recovered Version"
+                    );
+
+                    let msg = Slice::from("failed to build recovered Version");
+                    return Status::corruption(&msg, None);
+                }
+            };
 
             builder.save_to(v_ptr);
 
@@ -327,20 +471,51 @@ impl Recover for VersionSet {
 
             let dscname_s = dscname.clone();
             let current_s = current.clone();
+            let manifest_reused: bool = self.reuse_manifest(&dscname_s, &current_s);
 
-            if self.reuse_manifest(&dscname_s, &current_s) {
-                trace!("VersionSet::recover: reused existing MANIFEST");
+            if manifest_reused {
+                trace!(
+                    target: "bitcoinleveldb_versionset::recover",
+                    event = "versionset_recover_reused_manifest",
+                    dbname = %self.dbname(),
+                    descriptor = %dscname_s,
+                    "VersionSet::recover: reused existing MANIFEST"
+                );
             } else {
                 unsafe {
                     *save_manifest = true;
                 }
             }
+
+            trace!(
+                target: "bitcoinleveldb_versionset::recover",
+                event = "versionset_recover_exit",
+                dbname = %self.dbname(),
+                status_ok = s.is_ok(),
+                save_manifest = unsafe { *save_manifest },
+                manifest_reused,
+                manifest_records_seen,
+                manifest_edits_applied,
+                next_file,
+                last_sequence,
+                log_number,
+                prev_log_number,
+                "VersionSet::recover: exit"
+            );
+
+            return s;
         }
 
         trace!(
-            "VersionSet::recover: exit; status_ok={} save_manifest={}",
-            s.is_ok(),
-            unsafe { *save_manifest }
+            target: "bitcoinleveldb_versionset::recover",
+            event = "versionset_recover_exit_error",
+            dbname = %self.dbname(),
+            status_ok = s.is_ok(),
+            status = %s.to_string(),
+            save_manifest = unsafe { *save_manifest },
+            manifest_records_seen,
+            manifest_edits_applied,
+            "VersionSet::recover: exit"
         );
 
         s
@@ -350,131 +525,51 @@ impl Recover for VersionSet {
 #[cfg(test)]
 mod version_set_recover_exhaustive_test_suite {
     use super::*;
-    use std::io::Write;
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
-    use tracing::{debug, error, info, trace, warn};
-
-    fn make_unique_temp_db_dir(prefix: &str) -> PathBuf {
-        let pid = std::process::id();
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-
-        let mut p = std::env::temp_dir();
-        p.push(format!("{prefix}_{pid}_{nanos}"));
-        p
-    }
-
-    fn remove_dir_all_best_effort(dir: &Path) {
-        match std::fs::remove_dir_all(dir) {
-            Ok(()) => trace!(dir = %dir.display(), "removed temp db dir"),
-            Err(e) => warn!(dir = %dir.display(), error = ?e, "failed to remove temp db dir (best effort)"),
-        }
-    }
-
-    fn assert_status_ok(st: &Status, context: &'static str) {
-        if !st.is_ok() {
-            error!(?st, context, "unexpected non-ok Status");
-            panic!("unexpected non-ok Status in {context}");
-        }
-        trace!(context, "Status OK");
-    }
-
-    fn make_internal_key_comparator_from_options(options: &Options) -> InternalKeyComparator {
-        let ucmp_ptr: *const dyn SliceComparator =
-            options.comparator().as_ref() as *const dyn SliceComparator;
-        InternalKeyComparator::new(ucmp_ptr)
-    }
-
-    struct VersionSetRecoverHarness {
-        dir: PathBuf,
-        dbname: Box<String>,
-        options: Box<Options>,
-        icmp: Box<InternalKeyComparator>,
-        table_cache: Box<TableCache>,
-        versionset: Option<Box<VersionSet>>,
-    }
-
-    impl VersionSetRecoverHarness {
-        fn new(prefix: &str, create_if_missing: bool) -> Self {
-            let dir = make_unique_temp_db_dir(prefix);
-            std::fs::create_dir_all(&dir).unwrap();
-
-            let dbname = Box::new(dir.to_string_lossy().to_string());
-
-            let env = PosixEnv::shared();
-            let mut options = Box::new(Options::with_env(env));
-            options.set_create_if_missing(create_if_missing);
-            options.set_error_if_exists(false);
-
-            let icmp = Box::new(make_internal_key_comparator_from_options(options.as_ref()));
-
-            let mut table_cache = Box::new(TableCache::new(dbname.as_ref(), options.as_ref(), 64));
-
-            let versionset = VersionSet::new(
-                dbname.as_ref(),
-                options.as_ref(),
-                table_cache.as_mut() as *mut TableCache,
-                icmp.as_ref() as *const InternalKeyComparator,
-            );
-
-            Self {
-                dir,
-                dbname,
-                options,
-                icmp,
-                table_cache,
-                versionset: Some(versionset),
-            }
-        }
-
-        fn recover(&mut self) -> (Status, bool) {
-            let vs = self.versionset.as_mut().unwrap();
-            let mut save_manifest: bool = false;
-            let st = vs.recover(&mut save_manifest as *mut bool);
-            info!(save_manifest, status = ?st, "recover completed");
-            (st, save_manifest)
-        }
-
-        fn drop_versionset_now(&mut self) {
-            let _ = self.versionset.take();
-        }
-    }
 
     #[traced_test]
     fn recover_creates_new_db_when_allowed() {
-        let mut h = VersionSetRecoverHarness::new("versionset_recover_creates_db", true);
-        let (st, _save_manifest) = h.recover();
-        assert_status_ok(&st, "recover");
+        let mut h = VersionSetRecoveryScenarioHarness::open_for_create_if_missing_flag(
+            "versionset_recover_creates_db",
+            true,
+        );
+
+        let (st, _save_manifest) = h.recover_into_current_version_set();
+        assert_status_is_ok_or_panic(&st, "recover");
+
+        let cleanup_path = h.database_directory_path().to_path_buf();
 
         assert!(
-            h.dir.join("CURRENT").exists(),
+            cleanup_path.join("CURRENT").exists(),
             "CURRENT should exist after recover"
         );
 
-        h.drop_versionset_now();
-        remove_dir_all_best_effort(&h.dir);
+        h.drop_version_set_instance();
+        remove_directory_tree_best_effort(cleanup_path.as_path());
     }
 
     #[traced_test]
     fn recover_fails_on_missing_db_when_not_allowed() {
-        let mut h = VersionSetRecoverHarness::new("versionset_recover_disallowed_missing_db", false);
-        let (st, _save_manifest) = h.recover();
+        let mut h = VersionSetRecoveryScenarioHarness::open_for_create_if_missing_flag(
+            "versionset_recover_disallowed_missing_db",
+            false,
+        );
+
+        let (st, _save_manifest) = h.recover_into_current_version_set();
         debug!(?st, "recover result");
         assert!(
             !st.is_ok(),
             "recover must fail when db missing and create_if_missing=false"
         );
 
-        h.drop_versionset_now();
-        remove_dir_all_best_effort(&h.dir);
+        let cleanup_path = h.database_directory_path().to_path_buf();
+
+        h.drop_version_set_instance();
+        remove_directory_tree_best_effort(cleanup_path.as_path());
     }
 
     #[traced_test]
     fn recover_fails_on_corrupt_current_file_contents() {
-        let dir = make_unique_temp_db_dir("versionset_recover_corrupt_current");
+        let dir = build_unique_temporary_database_directory_path("versionset_recover_corrupt_current");
         std::fs::create_dir_all(&dir).unwrap();
 
         let current = dir.join("CURRENT");
@@ -491,7 +586,7 @@ mod version_set_recover_exhaustive_test_suite {
         options.set_create_if_missing(false);
         options.set_error_if_exists(false);
 
-        let icmp = Box::new(make_internal_key_comparator_from_options(options.as_ref()));
+        let icmp = Box::new(build_internal_key_comparator_from_database_options(options.as_ref()));
 
         let mut table_cache = Box::new(TableCache::new(dbname.as_ref(), options.as_ref(), 64));
 
@@ -511,12 +606,12 @@ mod version_set_recover_exhaustive_test_suite {
             "recover must fail when CURRENT is corrupt"
         );
 
-        remove_dir_all_best_effort(&dir);
+        remove_directory_tree_best_effort(&dir);
     }
 
     #[traced_test]
     fn recover_fails_when_current_points_to_missing_manifest() {
-        let dir = make_unique_temp_db_dir("versionset_recover_missing_manifest");
+        let dir = build_unique_temporary_database_directory_path("versionset_recover_missing_manifest");
         std::fs::create_dir_all(&dir).unwrap();
 
         let current = dir.join("CURRENT");
@@ -533,7 +628,7 @@ mod version_set_recover_exhaustive_test_suite {
         options.set_create_if_missing(false);
         options.set_error_if_exists(false);
 
-        let icmp = Box::new(make_internal_key_comparator_from_options(options.as_ref()));
+        let icmp = Box::new(build_internal_key_comparator_from_database_options(options.as_ref()));
 
         let mut table_cache = Box::new(TableCache::new(dbname.as_ref(), options.as_ref(), 64));
 
@@ -553,6 +648,6 @@ mod version_set_recover_exhaustive_test_suite {
             "recover must fail when CURRENT points to missing manifest"
         );
 
-        remove_dir_all_best_effort(&dir);
+        remove_directory_tree_best_effort(&dir);
     }
 }

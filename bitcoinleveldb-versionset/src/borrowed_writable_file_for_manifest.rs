@@ -63,123 +63,13 @@ impl Named for BorrowedWritableFileForManifest {
 #[cfg(test)]
 mod borrowed_writable_file_for_manifest_exhaustive_test_suite {
     use super::*;
-    use std::borrow::Cow;
-    use std::cell::RefCell;
-    use std::rc::Rc;
-    use tracing::{debug, error, info, trace, warn};
-
-    #[derive(Default, Debug)]
-    struct RecordingWritableFileState {
-        appended: Vec<u8>,
-        append_calls: usize,
-        close_calls: usize,
-        flush_calls: usize,
-        sync_calls: usize,
-    }
-
-    #[derive(Debug)]
-    struct RecordingWritableFile {
-        state: Rc<RefCell<RecordingWritableFileState>>,
-        label: String,
-    }
-
-    impl RecordingWritableFile {
-        fn new(state: Rc<RefCell<RecordingWritableFileState>>, label: &str) -> Self {
-            trace!(label, "RecordingWritableFile::new");
-            Self {
-                state,
-                label: label.to_string(),
-            }
-        }
-
-        fn slice_bytes(data: &Slice) -> Vec<u8> {
-            unsafe {
-                let ptr: *const u8 = *data.data();
-                let len: usize = *data.size();
-                std::slice::from_raw_parts(ptr, len).to_vec()
-            }
-        }
-
-    }
-
-    impl WritableFileAppend for RecordingWritableFile {
-        fn append(&mut self, data: &Slice) -> Status {
-            let bytes = Self::slice_bytes(data);
-            let mut st = self.state.borrow_mut();
-            st.append_calls += 1;
-            st.appended.extend_from_slice(&bytes);
-
-            trace!(
-                label = %self.label,
-                append_calls = st.append_calls,
-                bytes_len = bytes.len(),
-                total_len = st.appended.len(),
-                "RecordingWritableFile::append"
-            );
-
-            Status::ok()
-        }
-    }
-
-    impl WritableFileClose for RecordingWritableFile {
-        fn close(&mut self) -> Status {
-            let mut st = self.state.borrow_mut();
-            st.close_calls += 1;
-
-            trace!(
-                label = %self.label,
-                close_calls = st.close_calls,
-                "RecordingWritableFile::close"
-            );
-
-            Status::ok()
-        }
-    }
-
-    impl WritableFileFlush for RecordingWritableFile {
-        fn flush(&mut self) -> Status {
-            let mut st = self.state.borrow_mut();
-            st.flush_calls += 1;
-
-            trace!(
-                label = %self.label,
-                flush_calls = st.flush_calls,
-                "RecordingWritableFile::flush"
-            );
-
-            Status::ok()
-        }
-    }
-
-    impl WritableFileSync for RecordingWritableFile {
-        fn sync(&mut self) -> Status {
-            let mut st = self.state.borrow_mut();
-            st.sync_calls += 1;
-
-            trace!(
-                label = %self.label,
-                sync_calls = st.sync_calls,
-                "RecordingWritableFile::sync"
-            );
-
-            Status::ok()
-        }
-    }
-
-    impl Named for RecordingWritableFile {
-        fn name(&self) -> Cow<'_, str> {
-            Cow::Owned(format!("[recording-writablefile:{}]", self.label))
-        }
-    }
-
-    impl WritableFile for RecordingWritableFile {}
 
     #[traced_test]
     fn borrowed_writable_file_for_manifest_forwards_all_operations_and_does_not_take_ownership() {
-        let state = Rc::new(RefCell::new(RecordingWritableFileState::default()));
+        let state = Rc::new(RefCell::new(WritableFileRecordingState::default()));
 
         let inner: Box<dyn WritableFile> =
-            Box::new(RecordingWritableFile::new(state.clone(), "inner"));
+            Box::new(WritableFileRecorder::bind_shared_state_with_label(state.clone(), "inner"));
         let inner_ptr: *mut dyn WritableFile = Box::into_raw(inner);
 
         trace!(inner_ptr = %format!("{:p}", inner_ptr), "constructed inner writable file");
@@ -215,16 +105,20 @@ mod borrowed_writable_file_for_manifest_exhaustive_test_suite {
         {
             let st = state.borrow();
             debug!(
-                ?st,
+                append_call_count = st.append_call_count(),
+                flush_call_count = st.flush_call_count(),
+                sync_call_count = st.sync_call_count(),
+                close_call_count = st.close_call_count(),
+                appended_bytes = ?st.appended_bytes(),
                 "state after forwarding through BorrowedWritableFileForManifest"
             );
-            assert_eq!(st.append_calls, 2, "append should be forwarded exactly twice");
-            assert_eq!(st.flush_calls, 1, "flush should be forwarded exactly once");
-            assert_eq!(st.sync_calls, 1, "sync should be forwarded exactly once");
-            assert_eq!(st.close_calls, 1, "close should be forwarded exactly once");
+            assert_eq!(st.append_call_count(), 2, "append should be forwarded exactly twice");
+            assert_eq!(st.flush_call_count(), 1, "flush should be forwarded exactly once");
+            assert_eq!(st.sync_call_count(), 1, "sync should be forwarded exactly once");
+            assert_eq!(st.close_call_count(), 1, "close should be forwarded exactly once");
             assert_eq!(
-                st.appended,
-                b"hello world".to_vec(),
+                st.appended_bytes(),
+                b"hello world".as_slice(),
                 "appended bytes must be forwarded and concatenated"
             );
         }
@@ -240,13 +134,17 @@ mod borrowed_writable_file_for_manifest_exhaustive_test_suite {
 
         {
             let st = state.borrow();
-            debug!(?st, "state after using inner post-drop");
+            debug!(
+                append_call_count = st.append_call_count(),
+                appended_bytes = ?st.appended_bytes(),
+                "state after using inner post-drop"
+            );
             assert_eq!(
-                st.appended,
-                b"hello world!".to_vec(),
+                st.appended_bytes(),
+                b"hello world!".as_slice(),
                 "inner still functions after borrowed wrapper drop"
             );
-            assert_eq!(st.append_calls, 3, "inner append should have been called again");
+            assert_eq!(st.append_call_count(), 3, "inner append should have been called again");
         }
 
         unsafe {
@@ -256,9 +154,9 @@ mod borrowed_writable_file_for_manifest_exhaustive_test_suite {
 
     #[traced_test]
     fn borrowed_writable_file_for_manifest_reports_expected_name_and_exposes_inner_pointer() {
-        let state = Rc::new(RefCell::new(RecordingWritableFileState::default()));
+        let state = Rc::new(RefCell::new(WritableFileRecordingState::default()));
         let inner: Box<dyn WritableFile> =
-            Box::new(RecordingWritableFile::new(state.clone(), "inner2"));
+            Box::new(WritableFileRecorder::bind_shared_state_with_label(state.clone(), "inner2"));
         let inner_ptr: *mut dyn WritableFile = Box::into_raw(inner);
 
         let borrowed = BorrowedWritableFileForManifest::new(inner_ptr);

@@ -10,7 +10,10 @@ HACK_CLANG := env LD_LIBRARY_PATH=/usr/local/opt/llvm/lib/
 HACK_CLANG := 
 
 RUSTFLAGS := -Awarnings
-CARGO     := env CARGO_MSG_LIMIT=15 \
+CARGO     := env \
+			 RUSTFLAGS=-Awarnings \
+			 RUST_LOG=debug \
+			 CARGO_MSG_LIMIT=15 \
 			 CARGO_BUILD_JOBS=12 \
 			 NUM_JOBS=12 \
 			 cargo 
@@ -41,13 +44,17 @@ NO_FAIL_FAST := --no-fail-fast
 
 #----------------------------------------[active]
 ACTIVE := bitcoinsecp256k1-eccontext
-ACTIVE := bitcoinleveldb-dbtest        #loc: 2652
-ACTIVE := bitcoinleveldb-db            #loc: 1049
+
 ACTIVE := bitcoinleveldb-harness       #loc: 297
+ACTIVE := bitcoinleveldbt-sparsemerge #hang
+ACTIVE := bitcoinleveldbt-issue178 #sigkill
+ACTIVE := bitcoinleveldbt-randomized
+ACTIVE := bitcoinleveldbt-snapshot
+#ACTIVE := bitcoinleveldb-snapshot
+#ACTIVE := bitcoinleveldb-modeldb
+#ACTIVE := bitcoinleveldbt-issue320
 
 # ---[leveldb-layer-3]
-#ACTIVE := bitcoinleveldb-bench         #loc: 2997
-#ACTIVE := bitcoinleveldb-test          #loc: 3254
 #ACTIVE := bitcoin-leveldb              #loc: 36
 
 #-------------------------------[active-below]
@@ -254,6 +261,7 @@ INDIVIDUAL_TEST := db_open_fails_with_error_if_exists_and_leaves_dbptr_null
 INDIVIDUAL_TEST := new_iterator_returns_non_null_iterator_on_open_database
 INDIVIDUAL_TEST := test_new_internal_iterator_returns_non_null_iterator
 INDIVIDUAL_TEST := new_internal_iterator_increments_seed_and_returns_non_null_iterators
+INDIVIDUAL_TEST := probes
 #INDIVIDUAL_TEST := delete_obsolete_files
 
 
@@ -300,6 +308,135 @@ timings:
 
 bench:
 	RUSTFLAGS="-Awarnings -C target-cpu=native" $(CARGO) $(BENCH) -p $(ACTIVE)
+
+leveldb_bench: 
+	RUSTFLAGS="-Awarnings -C target-cpu=native" $(CARGO) $(BENCH) -p bitcoinleveldbt-bench --bench db_bench -- --benchmarks=fillseq --num=100000 
+	RUSTFLAGS="-Awarnings -C target-cpu=native" $(CARGO) $(BENCH) -p bitcoinleveldbt-bench --bench db_bench_sqlite3 -- --benchmarks=fillseq --num=100000
+
+
+check_test:
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme fault_injection_test_no_log_reuse -- --nocapture
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme recovery_test_manifest_missing -- --nocapture
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme recovery_test_large_manifest_compacted -- --nocapture
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme recovery_test_multiple_log_files -- --nocapture
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme corruption_test_compaction_input_error -- --nocapture
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme recovery_test_multiple_mem_tables -- --nocapture
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme recovery_test_no_log_files -- --nocapture
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme recovery_test_manifest_reused -- --nocapture
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme recovery_test_log_file_reuse -- --nocapture
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme bitcoinleveldb_test__c_test_rs__upstream_c_api_roundtrip_passes -- --nocapture
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme corruption_test_table_file -- --nocapture
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme corruption_test_table_file_repair -- --nocapture
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme issue320_test -- --nocapture
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme issue320_snapshot_probe_tests -- --nocapture
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme issue320_two_key_reducer_tests -- --nocapture
+	#-------------------------------
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme issue320_fanout_reducer_tests -- --nocapture
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme issue320_flush_only_fanout_8_keys_one_snapshot_matches_model_after_forced_compactions -- --nocapture
+	- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme issue320_flush_only_fanout_16_keys_one_snapshot_matches_model_after_forced_compactions -- --nocapture
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme issue320_flush_only_fanout_32_keys_two_snapshots_matches_model_after_forced_compactions -- --nocapture
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme issue320_flush_only_fanout_8_keys_one_snapshot_matches_model_after_reopen_with_verified_nonempty_wal -- --nocapture
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme issue320_flush_only_fanout_16_keys_one_snapshot_matches_model_after_reopen_with_verified_nonempty_wal -- --nocapture
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme issue320_flush_only_fanout_32_keys_two_snapshots_matches_model_after_reopen_with_verified_nonempty_wal -- --nocapture
+	#-------------------------------
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme fault_injection_test_with_log_reuse -- --nocapture
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme corruption_test_table_file_index_data -- --nocapture
+
+check_dbtest:
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-dbtest db_test_randomized -- --nocapture
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-dbtest db_test_snapshot_small_repro -- --nocapture
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-dbtest db_test_snapshot_reopen_immediate -- --nocapture
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-dbtest db_test_snapshot_frontier_model_fresh_snapshot_matches_live_without_reopen -- --nocapture
+	#----------------------
+	- $(CARGO) $(TEST) -p bitcoinleveldbt-dbtest db_test_snapshot_clue_live_compare_single_put_no_snapshot -- --nocapture
+	- $(CARGO) $(TEST) -p bitcoinleveldbt-dbtest db_test_snapshot_clue_live_compare_single_put_after_reopen_no_snapshot -- --nocapture
+	- $(CARGO) $(TEST) -p bitcoinleveldbt-dbtest db_test_snapshot_clue_db_fresh_snapshot_matches_live_after_reopen -- --nocapture
+	- $(CARGO) $(TEST) -p bitcoinleveldbt-dbtest db_test_snapshot_clue_db_old_snapshot_survives_later_put_after_reopen -- --nocapture
+	- $(CARGO) $(TEST) -p bitcoinleveldbt-dbtest db_test_snapshot_frontier_model_fresh_snapshot_matches_live_without_reopen -- --nocapture
+	- $(CARGO) $(TEST) -p bitcoinleveldbt-dbtest db_test_snapshot_frontier_model_fresh_snapshot_matches_live_after_reopen -- --nocapture
+	- $(CARGO) $(TEST) -p bitcoinleveldbt-dbtest db_test_snapshot_frontier_model_old_snapshot_survives_later_put_without_reopen -- --nocapture
+	- $(CARGO) $(TEST) -p bitcoinleveldbt-dbtest db_test_snapshot_frontier_model_old_snapshot_survives_later_put_after_reopen -- --nocapture
+	- $(CARGO) $(TEST) -p bitcoinleveldbt-dbtest db_test_snapshot_clue_model_direct_snapshot_ref_preserves_contents -- --nocapture
+	- $(CARGO) $(TEST) -p bitcoinleveldbt-dbtest db_test_snapshot_clue_snapshot_ref_bridge_preserves_model_snapshot_kind -- --nocapture
+	- $(CARGO) $(TEST) -p bitcoinleveldbt-dbtest db_test_snapshot_clue_snapshot_ref_bridge_preserves_model_snapshot_contents -- --nocapture
+	- $(CARGO) $(TEST) -p bitcoinleveldbt-dbtest db_test_snapshot_clue_snapshot_ref_bridge_preserves_real_db_snapshot_contents -- --nocapture
+	- $(CARGO) $(TEST) -p bitcoinleveldbt-dbtest db_test_snapshot_clue_dbtest_bridge_preserves_model_snapshot_kind -- --nocapture
+	- $(CARGO) $(TEST) -p bitcoinleveldbt-dbtest db_test_snapshot_clue_dbtest_bridge_preserves_model_snapshot_contents -- --nocapture
+	#----------------------
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-dbtest db_test_l0_compaction_bug_issue44_a -- --nocapture
+	#- $(CARGO) $(TEST) -p bitcoinleveldbt-dbtest db_test_l0_compaction_bug_issue44_b -- --nocapture
+
+check_randomized_bisect:
+	- $(CARGO) $(TEST) -p bitcoinleveldbt-randomized bisect -- --nocapture
+
+check_randomized:
+	- $(CARGO) $(TEST) -p bitcoinleveldbt-randomized db_test_randomized -- --nocapture
+
+check_dbimpl:
+	RUST_LOG=bitcoinleveldb_dbimpl::t_compaction_output_boundary_specifications=trace,bitcoinleveldb_dbimpl::t_live_compaction_output_boundary_support=trace,bitcoinleveldb_dbimpl::test_live_compaction_boundary_access=trace,bitcoinleveldb_dbimpl::do_compaction_work=trace cargo test -p bitcoinleveldb-dbimpl t_dbimpl_compaction_output_boundary_specifications -- --nocapture --test-threads=1
+
+recovery_cluster: 
+	- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme recovery_test -- --nocapture --test-threads=1
+
+serial_suite: 
+	- $(CARGO) $(TEST) -p bitcoinleveldbt-deleteme -- --nocapture --test-threads=1 $(NO_FAIL_FAST)
+
+serial_suite_without_recovery:
+	- $(CARGO) $(TEST) --no-fail-fast -p bitcoinleveldbt-deleteme -- --nocapture --test-threads=1 --skip recovery_test
+
+serial_suite_without_c_api:
+	- $(CARGO) $(TEST) --no-fail-fast -p bitcoinleveldbt-deleteme -- --nocapture --test-threads=1 --skip bitcoinleveldb_test__c_test_rs__upstream_c_api_roundtrip_passes
+
+c_api_then_corruption_cluster:
+	- $(CARGO) $(TEST) --no-fail-fast -p bitcoinleveldbt-deleteme -- --nocapture --test-threads=1 \
+		--skip recovery_test \
+		--skip fault_injection_test \
+		--skip issue
+
+corruption_cluster_serial:
+	- $(CARGO) $(TEST) --no-fail-fast -p bitcoinleveldbt-deleteme corruption_test -- --nocapture --test-threads=1
+
+c_api_then_compaction_input_error_focus:
+	- $(CARGO) $(TEST) --no-fail-fast -p bitcoinleveldbt-deleteme -- --nocapture --test-threads=1 \
+		--skip recovery_test \
+		--skip fault_injection_test \
+		--skip issue \
+		--skip corruption_test_corrupted_descriptor \
+		--skip corruption_test_missing_descriptor \
+		--skip corruption_test_new_file_error_during_write \
+		--skip corruption_test_recover_write_error \
+		--skip corruption_test_recovery \
+		--skip corruption_test_sequence_number_recovery \
+		--skip corruption_test_table_file \
+		--skip corruption_test_table_file_index_data \
+		--skip corruption_test_table_file_repair \
+		--skip corruption_test_unrelated_keys \
+		--skip corruption_test_compaction_input_error_paranoid
+
+.PHONY: dbtest-randomized-focus
+dbtest-randomized-focus:
+	@env RUSTFLAGS=-Awarnings \
+		RUST_LOG='off,bitcoinleveldbt-dbtest=trace,bitcoinleveldb_modeldb::iter=trace,bitcoinleveldb_dbimpl::new_iterator=trace,bitcoinleveldb_dbimpl::new_internal_iterator=trace,bitcoinleveldb_version::add_iterators=trace,bitcoinleveldb_dbiter=trace,bitcoinleveldb_merger=trace,bitcoinleveldb_memtable::memtable_iterator=trace,bitcoinleveldb_tablecache=trace,bitcoinleveldb_duplex=trace,bitcoinleveldb_blockiter=trace' \
+		CARGO_MSG_LIMIT=15 \
+		CARGO_BUILD_JOBS=12 \
+		NUM_JOBS=12 \
+		cargo test -p bitcoinleveldbt-dbtest db_rand::db_test_randomized -- --exact --nocapture
+
+.PHONY: test-mt
+test-mt:
+	RUST_BACKTRACE=1 $(CARGO) test -p bitcoinleveldbt-mt mt_test::db_test_multi_threaded -- --nocapture --test-threads=1
+
+test-snapshot:
+	- $(CARGO) $(TEST) --no-fail-fast -p bitcoinleveldbt-snapshot clue_flush_tests -- --nocapture --test-threads=1 --skip get_snapshot
+
+test-snapshot2:
+	env RUSTFLAGS=-Awarnings RUST_LOG=debug CARGO_MSG_LIMIT=15 CARGO_BUILD_JOBS=12 NUM_JOBS=12 cargo test --no-fail-fast -p bitcoinleveldbt-snapshot probe -- --nocapture --test-threads=1 --skip get_snapshot
+
+test-get-snapshot2:
+	env RUSTFLAGS=-Awarnings RUST_LOG=debug CARGO_MSG_LIMIT=15 CARGO_BUILD_JOBS=12 NUM_JOBS=12 cargo test --no-fail-fast -p bitcoinleveldbt-snapshot get_snapshot2_tests -- --nocapture --test-threads=1
+
+test-snapshot3:
+	env RUSTFLAGS=-Awarnings RUST_LOG=debug CARGO_MSG_LIMIT=15 CARGO_BUILD_JOBS=12 NUM_JOBS=12 cargo test --no-fail-fast -p bitcoinleveldbt-snapshot clue_dbtest_bridge -- --nocapture --test-threads=1 --skip get_snapshot
 
 #-------------------------------[done-below]
 #ACTIVE := bitcoin-amt
@@ -406,7 +543,6 @@ bench:
 #ACTIVE := bitcoinleveldb-memenv
 #ACTIVE := bitcoinleveldb-memtable
 #ACTIVE := bitcoinleveldb-merger
-#ACTIVE := bitcoinleveldb-mockversionset
 #ACTIVE := bitcoinleveldb-options
 #ACTIVE := bitcoinleveldb-posix
 #ACTIVE := bitcoinleveldb-posixlogger
@@ -419,7 +555,6 @@ bench:
 #ACTIVE := bitcoinleveldb-repair
 #ACTIVE := bitcoinleveldb-reversekeycomparator
 #ACTIVE := bitcoinleveldb-skiplist
-#ACTIVE := bitcoinleveldb-snapshot
 #ACTIVE := bitcoinleveldb-specialenv
 #ACTIVE := bitcoinleveldb-status
 #ACTIVE := bitcoinleveldb-stringsink
@@ -428,15 +563,18 @@ bench:
 #ACTIVE := bitcoinleveldb-table
 #ACTIVE := bitcoinleveldb-tablebuilder
 #ACTIVE := bitcoinleveldb-tablecache
+#ACTIVE := bitcoinleveldbt-util
 #ACTIVE := bitcoinleveldb-tableconstructor
 #ACTIVE := bitcoinleveldb-tablerep
-#ACTIVE := bitcoinleveldb-testenv
 #ACTIVE := bitcoinleveldb-util
 #ACTIVE := bitcoinleveldb-version
 #ACTIVE := bitcoinleveldb-versionedit
 #ACTIVE := bitcoinleveldb-versioniterator
 #ACTIVE := bitcoinleveldb-versionsetinterface
 #ACTIVE := bitcoinleveldb-versionsetutil
+
+#ACTIVE := bitcoinleveldb-versionset
+
 #ACTIVE := bitcoinsecp256k1-ecmult
 #ACTIVE := bitcoinsecp256k1-ecmultgen
 #ACTIVE := bitcoinsecp256k1-fe10x26 
@@ -457,3 +595,22 @@ bench:
 #ACTIVE := bitcoinleveldb-dbiterstate        #loc: 1883
 #ACTIVE := bitcoinleveldb-dbimpl        #loc: 1883
 #ACTIVE := bitcoinleveldb-dbconstructor #loc: 99
+#ACTIVE := bitcoinleveldb-db            #loc: 1049
+#ACTIVE := bitcoinleveldbt-versionsettestutil
+#ACTIVE := bitcoinleveldbt-util
+#ACTIVE := bitcoinleveldbt-table
+#ACTIVE := bitcoinleveldbt-recovery
+#ACTIVE := bitcoinleveldbt-mockversionset
+#ACTIVE := bitcoinleveldbt-faultinjection #passes in +20 min
+#ACTIVE := bitcoinleveldbt-corruption #passes in about 7min
+#ACTIVE := bitcoinleveldbt-bench
+#ACTIVE := bitcoinleveldbt-capi
+#ACTIVE := bitcoinleveldbt-issue474
+#ACTIVE := bitcoinleveldbt-issue200
+#ACTIVE := bitcoinleveldb-dbimpl        #loc: 2652
+#ACTIVE := bitcoinleveldb-test
+#ACTIVE := bitcoinleveldbt-env
+#ACTIVE := bitcoinleveldbt-mt
+#ACTIVE := bitcoinleveldbt-autocompaction #there exists a hang here
+#ACTIVE := bitcoinleveldbt-issue44
+#ACTIVE := bitcoinleveldbt-dbtest

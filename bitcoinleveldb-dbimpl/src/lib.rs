@@ -43,8 +43,9 @@ x!{dbimpl_null_file_lock}
 x!{dbimpl_user_comparator_adapter}
 x!{background_call}
 
-#[cfg(test)]
-x!{test_hooks}
+xt!{test_hooks}
+xt!{rt_probe}
 
-#[cfg(test)]
-x!{rt_probe}
+xt!{t_dbimpl_compaction_output_boundary_specifications}
+xt!{t_dbimpl_live_compaction_output_boundary_support}
+xt!{t_live_compaction_mutex_probe_support}
