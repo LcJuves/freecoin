@@ -24,13 +24,13 @@ workspace = true
 proc-macro = true
 
 [package]
-authors = ["klebs <none>"]
+authors = ["klebs"]
 categories = [
     "concurrency",
     "web-programming",
     "compilers",
 ]
-description = "A procedural macro crate providing attributes for concurrency control, signal-slot mechanisms, and fuzz testing, designed for Bitcoin-related Rust projects."
+description = "Compatibility procedural attributes for translated Bitcoin Core and LevelDB code; thread annotations record documentation rather than enforce locking."
 documentation = "https://docs.rs/bitcoin-derive"
 edition = "2021"
 keywords = [
@@ -40,7 +40,7 @@ keywords = [
     "signals",
     "fuzzing",
 ]
-license = "MIT"
+license = "MIT AND BSD-3-Clause"
 name = "bitcoin-derive"
 repository = "https://github.com/klebs6/bitcoin-rs"
 version = "0.1.19"

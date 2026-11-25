@@ -1,0 +1,55 @@
+bitcoin-support source and attribution
+
+Part of https://github.com/klebs6/bitcoin-rs.
+Package distribution expression: MIT.
+
+LICENSE retains the existing repository MIT notice. Original notices,
+source comments and Git authorship remain unchanged.
+
+Included Core-derived support material and local Rust additions use the
+MIT context. BSD dependencies keep their own notices; dependency use alone
+does not change this package source declaration.
+
+Upstream source/header reference checks used bitcoin/bitcoin v22.0.
+This is a reproducible comparison snapshot, not a claim that it was the
+exact historical input revision of the Rust port.
+
+Corresponding upstream files and retained header notices:
+
+- src/support/allocators/secure.h
+  https://github.com/bitcoin/bitcoin/blob/v22.0/src/support/allocators/secure.h
+  Copyright (c) 2009-2010 Satoshi Nakamoto
+  Copyright (c) 2009-2019 The Bitcoin Core developers
+
+- src/support/allocators/zeroafterfree.h
+  https://github.com/bitcoin/bitcoin/blob/v22.0/src/support/allocators/zeroafterfree.h
+  Copyright (c) 2009-2010 Satoshi Nakamoto
+  Copyright (c) 2009-2018 The Bitcoin Core developers
+
+- src/support/cleanse.cpp
+  https://github.com/bitcoin/bitcoin/blob/v22.0/src/support/cleanse.cpp
+  Copyright (c) 2009-2010 Satoshi Nakamoto
+  Copyright (c) 2009-2019 The Bitcoin Core developers
+
+- src/support/cleanse.h
+  https://github.com/bitcoin/bitcoin/blob/v22.0/src/support/cleanse.h
+  Copyright (c) 2009-2010 Satoshi Nakamoto
+  Copyright (c) 2009-2019 The Bitcoin Core developers
+
+- src/support/lockedpool.cpp
+  https://github.com/bitcoin/bitcoin/blob/v22.0/src/support/lockedpool.cpp
+  Copyright (c) 2016-2020 The Bitcoin Core developers
+
+- src/util/getuniquepath.h
+  https://github.com/bitcoin/bitcoin/blob/v22.0/src/util/getuniquepath.h
+  Copyright (c) 2021 The Bitcoin Core developers
+
+The full LevelDB and CRC32C BSD texts remain in LICENSE.leveldb and
+LICENSE.crc32c. Additional retained texts are reference/closure notices,
+not a claim that every listed upstream work appears in this package.
+External Cargo dependencies retain their own license declarations.
+
+The repository record doc/release/leveldb-source-attribution101.json
+indexes every included code file by hash and records the source witnesses
+and package conclusions. New Rust adaptations/tests are distinguished from
+upstream references; exact historical ancestry is not asserted.

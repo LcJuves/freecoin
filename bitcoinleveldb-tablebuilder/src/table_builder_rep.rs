@@ -38,7 +38,7 @@ pub struct TableBuilderRep  {
     /// Handle to add to index block
     /// 
     pending_handle:      BlockHandle,
-    compressed_output:   String,
+    compressed_output:   Vec<u8>,
 }
 
 impl TableBuilderRep {
@@ -90,7 +90,7 @@ impl TableBuilderRep {
             filter_block:        filter_block_ptr,
             pending_index_entry: false,
             pending_handle:      BlockHandle::default(),
-            compressed_output:   String::new(),
+            compressed_output:   Vec::<u8>::new(),
         }
     }
 }
@@ -155,7 +155,7 @@ mod table_builder_rep_internal_tests {
         );
 
         unsafe {
-            let fb_raw = rep.filter_block();
+            let fb_raw = *rep.filter_block();
             if !fb_raw.is_null() {
                 trace!("freeing FilterBlockBuilder allocated by TableBuilderRep::new");
                 let _ = Box::from_raw(fb_raw);

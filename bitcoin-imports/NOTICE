@@ -1,0 +1,27 @@
+bitcoin-imports source and attribution
+
+Part of https://github.com/klebs6/bitcoin-rs.
+Package distribution expression: MIT.
+
+LICENSE retains the existing repository MIT notice. Original notices,
+source comments and Git authorship remain unchanged.
+
+The current included source was reviewed as local Rust glue, adapters or
+helpers under the repository MIT context. Calling or re-exporting a
+dependency does not copy that dependency implementation into these files.
+
+Upstream source/header reference checks used bitcoin/bitcoin v22.0.
+This is a reproducible comparison snapshot, not a claim that it was the
+exact historical input revision of the Rust port.
+
+No independent upstream implementation is attributed by this notice.
+
+The full LevelDB and CRC32C BSD texts remain in LICENSE.leveldb and
+LICENSE.crc32c. Additional retained texts are reference/closure notices,
+not a claim that every listed upstream work appears in this package.
+External Cargo dependencies retain their own license declarations.
+
+The repository record doc/release/leveldb-source-attribution101.json
+indexes every included code file by hash and records the source witnesses
+and package conclusions. New Rust adaptations/tests are distinguished from
+upstream references; exact historical ancestry is not asserted.

@@ -24,11 +24,11 @@ workspace = true
 workspace = true
 
 [package]
-authors = ["klebs <none>"]
-description = "Low-level, Bitcoin Core–compatible in-memory cache for LevelDB-style storage, providing capacity-bounded LRU eviction, explicit charge-based memory accounting, and opaque pointer values with custom deleters for FFI-heavy systems."
+authors = ["klebs"]
+description = "Handle-based caching used by the bitcoin-rs LevelDB storage engine."
 documentation = "https://docs.rs/bitcoinleveldb-cache"
 edition = "2021"
-license = "MIT"
+license = "MIT AND BSD-3-Clause"
 name = "bitcoinleveldb-cache"
 repository = "https://github.com/klebs6/bitcoin-rs"
 version = "0.1.19"

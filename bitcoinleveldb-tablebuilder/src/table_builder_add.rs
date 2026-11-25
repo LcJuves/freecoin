@@ -91,16 +91,16 @@ impl TableBuilder {
 
                 r.set_last_key_(last_key_bytes);
 
-                let mut handle_encoding = String::new();
+                let mut handle_encoding = Vec::<u8>::new();
                 {
                     let handle: &mut BlockHandle = r.pending_handle_mut();
-                    let enc_ptr: *mut String = &mut handle_encoding;
+                    let enc_ptr: *mut Vec<u8> = &mut handle_encoding;
                     handle.encode_to(enc_ptr);
                 }
 
                 let last_key_slice = Slice::from(r.last_key_().as_slice());
                 let handle_slice =
-                    Slice::from(handle_encoding.as_bytes());
+                    Slice::from(handle_encoding.as_slice());
 
                 trace!(
                     "TableBuilder::add: emitting index entry; last_key_len={}, handle_len={}",
@@ -207,8 +207,8 @@ mod table_builder_addition_tests {
                 "after one Add call num_entries must be 1"
             );
             assert_eq!(
-                rep.last_key_(),
-                "a",
+                rep.last_key_().as_slice(),
+                b"a".as_slice(),
                 "last_key_ must track the last added key"
             );
             assert!(
@@ -264,8 +264,8 @@ mod table_builder_addition_tests {
                 "num_entries must reflect number of Add calls"
             );
             assert_eq!(
-                rep.last_key_(),
-                "c",
+                rep.last_key_().as_slice(),
+                b"c".as_slice(),
                 "last_key_ must track the last key inserted"
             );
         }

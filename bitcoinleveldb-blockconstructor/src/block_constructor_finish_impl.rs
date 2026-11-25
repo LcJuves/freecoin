@@ -4,8 +4,18 @@ crate::ix!();
 impl BlockConstructor {
 
     pub fn finish_impl(&mut self, options: &Options, data: &KVMap) -> crate::Status {
+        self.finish_impl_bytes(options, &constructor_bytes_from_text(data))
+    }
+
+    pub fn finish_impl_bytes(&mut self, options: &Options, data: &ConstructorByteMap) -> crate::Status {
+        if self.comparator_ref().name() != options.comparator().name() {
+            return Status::invalid_argument(&Slice::from("block constructor comparator mismatch"), None);
+        }
+        let entries = match constructor_ordered_byte_entries(data, self.comparator_ref()) {
+            Ok(entries) => entries, Err(status) => return status,
+        };
         let existing_block = self.block_ptr();
-        let data_len       = self.data_string().len();
+        let data_len       = self.data_bytes().len();
 
         trace!(
             "BlockConstructor::finish_impl: kv_count={}, existing_block={:?}, data_len_before={}",
@@ -29,21 +39,9 @@ impl BlockConstructor {
         let opts_ptr: *const Options = options as *const Options;
         let mut builder = BlockBuilder::new(opts_ptr);
 
-        // To satisfy BlockBuilder's strictly-increasing key requirement,
-        // iterate over the entries in comparator order rather than UTF-8 lexical order.
-        let comparator: &dyn SliceComparator = self.comparator_ref();
-
-        let mut entries: Vec<(&String, &String)> = data.iter().collect();
-        entries.sort_by(|(k1, _), (k2, _)| {
-            let key1: Slice = Slice::from(k1.as_bytes());
-            let key2: Slice = Slice::from(k2.as_bytes());
-            let cmp: i32 = comparator.compare(&key1, &key2);
-            cmp.cmp(&0)
-        });
-
         for (key, value) in entries.into_iter() {
-            let key_bytes:   &[u8] = key.as_bytes();
-            let value_bytes: &[u8] = value.as_bytes();
+            let key_bytes:   &[u8] = key.as_slice();
+            let value_bytes: &[u8] = value.as_slice();
 
             let key_slice   = Slice::from(key_bytes);
             let value_slice = Slice::from(value_bytes);
@@ -65,28 +63,16 @@ impl BlockConstructor {
             *block_slice.size()
         );
 
-        self.data_string_mut().clear();
-        unsafe {
-            let buf: &mut Vec<u8> = self.data_string_mut().as_mut_vec();
-            buf.clear();
-
-            let ptr: *const u8 = *block_slice.data();
-            let len: usize     = *block_slice.size();
-
-            if !ptr.is_null() && len > 0 {
-                let bytes: &[u8] = core::slice::from_raw_parts(ptr, len);
-                buf.extend_from_slice(bytes);
-            }
-        }
+        *self.data_bytes_mut() = block_slice.as_bytes().to_vec();
 
         trace!(
             "BlockConstructor::finish_impl: data_len_after_copy={}",
-            self.data_string().len()
+            self.data_bytes().len()
         );
 
         // Open the block.
         let contents = BlockContents::new(
-            Slice::from(self.data_string()),
+            Slice::from(self.data_bytes()),
             false, // cachable
             false, // heap_allocated
         );
@@ -289,7 +275,7 @@ mod block_constructor_finish_and_block_opening_tests {
             "finish_impl should succeed for well-formed input"
         );
 
-        let data_len  = constructor.data_string().len();
+        let data_len  = constructor.data_bytes().len();
         let block_ptr = constructor.block_ptr();
         debug!(
             "finish_impl_builds_block_and_populates_data_string_for_non_empty_map: data_len={}, block_ptr={:?}",
@@ -317,7 +303,7 @@ mod block_constructor_finish_and_block_opening_tests {
         assert!(status1.is_ok());
 
         let first_block = constructor.block_ptr();
-        let first_len   = constructor.data_string().len();
+        let first_len   = constructor.data_bytes().len();
         trace!(
             "finish_impl_replaces_existing_block_without_panicking: after first finish_impl: block_ptr={:?}, data_len={}",
             first_block,
@@ -336,7 +322,7 @@ mod block_constructor_finish_and_block_opening_tests {
         assert!(status2.is_ok());
 
         let second_block = constructor.block_ptr();
-        let second_len   = constructor.data_string().len();
+        let second_len   = constructor.data_bytes().len();
 
         debug!(
             "finish_impl_replaces_existing_block_without_panicking: after second finish_impl: block_ptr={:?}, data_len={}",
@@ -367,7 +353,7 @@ mod block_constructor_finish_and_block_opening_tests {
             "finish_impl should succeed even for an empty KVMap"
         );
 
-        let data_len  = constructor.data_string().len();
+        let data_len  = constructor.data_bytes().len();
         let block_ptr = constructor.block_ptr();
 
         debug!(

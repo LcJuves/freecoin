@@ -1,0 +1,96 @@
+bitcoin-crc32c source and attribution
+
+Part of https://github.com/klebs6/bitcoin-rs.
+Package distribution expression: MIT AND BSD-3-Clause.
+
+LICENSE retains the existing repository MIT notice. Original notices,
+source comments and Git authorship remain unchanged.
+
+Included translated/adapted CRC32C material retains BSD-3-Clause
+conditions alongside the repository MIT context and Rust additions. The
+AND expression records cumulative conditions; it does not offer a choice
+of licenses or attribute every local helper/test to upstream.
+
+Upstream source/header reference checks used bitcoin/bitcoin v22.0.
+This is a reproducible comparison snapshot, not a claim that it was the
+exact historical input revision of the Rust port.
+
+Corresponding upstream files and retained header notices:
+
+- src/crc32c/include/crc32c/crc32c.h
+  https://github.com/bitcoin/bitcoin/blob/v22.0/src/crc32c/include/crc32c/crc32c.h
+  Copyright 2017 The CRC32C Authors. All rights reserved.
+
+- src/crc32c/src/crc32c.cc
+  https://github.com/bitcoin/bitcoin/blob/v22.0/src/crc32c/src/crc32c.cc
+  Copyright 2017 The CRC32C Authors. All rights reserved.
+
+- src/crc32c/src/crc32c_arm64.cc
+  https://github.com/bitcoin/bitcoin/blob/v22.0/src/crc32c/src/crc32c_arm64.cc
+  Copyright 2017 The CRC32C Authors. All rights reserved.
+
+- src/crc32c/src/crc32c_arm64.h
+  https://github.com/bitcoin/bitcoin/blob/v22.0/src/crc32c/src/crc32c_arm64.h
+  Copyright 2017 The CRC32C Authors. All rights reserved.
+
+- src/crc32c/src/crc32c_arm64_check.h
+  https://github.com/bitcoin/bitcoin/blob/v22.0/src/crc32c/src/crc32c_arm64_check.h
+  Copyright 2017 The CRC32C Authors. All rights reserved.
+
+- src/crc32c/src/crc32c_benchmark.cc
+  https://github.com/bitcoin/bitcoin/blob/v22.0/src/crc32c/src/crc32c_benchmark.cc
+  Copyright 2017 The CRC32C Authors. All rights reserved.
+
+- src/crc32c/src/crc32c_capi_unittest.c
+  https://github.com/bitcoin/bitcoin/blob/v22.0/src/crc32c/src/crc32c_capi_unittest.c
+  Copyright 2017 The CRC32C Authors. All rights reserved.
+
+- src/crc32c/src/crc32c_portable.cc
+  https://github.com/bitcoin/bitcoin/blob/v22.0/src/crc32c/src/crc32c_portable.cc
+  Copyright 2008 The CRC32C Authors. All rights reserved.
+
+- src/crc32c/src/crc32c_prefetch.h
+  https://github.com/bitcoin/bitcoin/blob/v22.0/src/crc32c/src/crc32c_prefetch.h
+  Copyright 2017 The CRC32C Authors. All rights reserved.
+
+- src/crc32c/src/crc32c_read_le.h
+  https://github.com/bitcoin/bitcoin/blob/v22.0/src/crc32c/src/crc32c_read_le.h
+  Copyright 2017 The CRC32C Authors. All rights reserved.
+
+- src/crc32c/src/crc32c_read_le_unittest.cc
+  https://github.com/bitcoin/bitcoin/blob/v22.0/src/crc32c/src/crc32c_read_le_unittest.cc
+  Copyright 2017 The CRC32C Authors. All rights reserved.
+
+- src/crc32c/src/crc32c_round_up.h
+  https://github.com/bitcoin/bitcoin/blob/v22.0/src/crc32c/src/crc32c_round_up.h
+  Copyright 2017 The CRC32C Authors. All rights reserved.
+
+- src/crc32c/src/crc32c_round_up_unittest.cc
+  https://github.com/bitcoin/bitcoin/blob/v22.0/src/crc32c/src/crc32c_round_up_unittest.cc
+  Copyright 2017 The CRC32C Authors. All rights reserved.
+
+- src/crc32c/src/crc32c_sse42.cc
+  https://github.com/bitcoin/bitcoin/blob/v22.0/src/crc32c/src/crc32c_sse42.cc
+  Copyright 2008 The CRC32C Authors. All rights reserved.
+
+- src/crc32c/src/crc32c_sse42.h
+  https://github.com/bitcoin/bitcoin/blob/v22.0/src/crc32c/src/crc32c_sse42.h
+  Copyright 2017 The CRC32C Authors. All rights reserved.
+
+- src/crc32c/src/crc32c_sse42_check.h
+  https://github.com/bitcoin/bitcoin/blob/v22.0/src/crc32c/src/crc32c_sse42_check.h
+  Copyright 2017 The CRC32C Authors. All rights reserved.
+
+- src/crc32c/src/crc32c_unittest.cc
+  https://github.com/bitcoin/bitcoin/blob/v22.0/src/crc32c/src/crc32c_unittest.cc
+  Copyright 2017 The CRC32C Authors. All rights reserved.
+
+The full LevelDB and CRC32C BSD texts remain in LICENSE.leveldb and
+LICENSE.crc32c. Additional retained texts are reference/closure notices,
+not a claim that every listed upstream work appears in this package.
+External Cargo dependencies retain their own license declarations.
+
+The repository record doc/release/leveldb-source-attribution101.json
+indexes every included code file by hash and records the source witnesses
+and package conclusions. New Rust adaptations/tests are distinguished from
+upstream references; exact historical ancestry is not asserted.

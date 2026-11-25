@@ -63,10 +63,17 @@ pub struct VersionSet {
     /// InternalKey.
     /// 
     #[getset(get_mut = "pub(crate)")]
-    compact_pointer: [String; NUM_LEVELS],
+    compact_pointer: [Vec<u8>; NUM_LEVELS],
 }
 
 impl VersionSet {
+    /// Borrow the wrapper owned by this VersionSet without cloning its Env Rc.
+    /// The wrapper serializes each forwarded call and releases its gate before
+    /// the caller can reacquire a database mutex.
+    pub(crate) fn env_mut(&mut self) -> &mut dyn Env {
+        self.env.as_mut()
+    }
+
     #[inline]
     pub(crate) fn dummy_versions_mut_ptr(&mut self) -> *mut Version {
         core::ptr::addr_of_mut!(self.dummy_versions)
@@ -121,8 +128,8 @@ impl VersionSet {
         let dummy_files: [Vec<*mut FileMetaData>; NUM_LEVELS] =
             core::array::from_fn(|_| Vec::new());
 
-        let compact_pointer_init: [String; NUM_LEVELS] =
-            core::array::from_fn(|_| String::new());
+        let compact_pointer_init: [Vec<u8>; NUM_LEVELS] =
+            core::array::from_fn(|_| Vec::<u8>::new());
 
         // Build the dummy sentinel with null links; we will patch links *after* boxing.
         let dummy_versions = VersionBuilder::default()

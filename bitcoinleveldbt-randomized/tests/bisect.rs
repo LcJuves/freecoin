@@ -14,6 +14,12 @@ use bitcoinleveldb_dbinterface::*;
 use bitcoinleveldb_modeldb::*;
 
 
+#[path = "support/randomized_operations.rs"]
+mod randomized_operations;
+#[path = "support/execution_controls.rs"]
+mod execution_controls;
+use randomized_operations::{BatchMutation, Mutation, OperationGenerator, LEGACY_STEPS_PER_CONFIGURATION, OPTION_CONFIGURATION_COUNT};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Getters, Builder)]
 #[getset(get = "pub")]
 #[builder(pattern = "owned")]
@@ -61,7 +67,9 @@ struct BitcoinLevelDbTRandomizedBisectedFailureObservation {
     /// The step index must refer to the first failing prefix, not a later derived mismatch.
     failing_step_index: i32,
     /// This is the executed prefix length used for the run that produced this observation.
-    /// Prefix runs are monotone: if this prefix fails, any longer prefix must include this failure site.
+    /// Generated operation prefixes are stable at the selected configuration.
+    /// Repeatable and monotone database failures remain assumptions: background
+    /// work can change execution even when the operation stream is identical.
     executed_prefix_length: i32,
     /// This is the random branch selector `p` for the failing step.
     /// It preserves the exact branch decision that classified the step.
@@ -79,7 +87,8 @@ struct BitcoinLevelDbTRandomizedBisectedFailureObservation {
     /// For non-batch steps this must remain zero.
     last_write_batch_operation_count: i32,
     /// This is the first observed failure class for the prefix.
-    /// The class must remain stable for deterministic replay of the same prefix.
+    /// Repeated database runs can observe different classes when background work
+    /// changes execution; matching operation streams alone do not rule that out.
     failure_mode: BitcoinLevelDbTRandomizedBisectFailureMode,
 }
 
@@ -299,7 +308,10 @@ fn bitcoinleveldbt_randomized_execute_prefix_and_return_first_failure(
             | DBTestOptionConfig::Uncompressed => {}
     }
 
-    let mut rnd = Random::new(seed);
+    let mut operations = OperationGenerator::for_configuration(
+        seed,
+        option_configuration_index as usize,
+    );
     let mut dbtest = DBTest::default();
 
     let option_configuration_available =
@@ -344,10 +356,7 @@ fn bitcoinleveldbt_randomized_execute_prefix_and_return_first_failure(
     let mut model = ModelDB::new(&opts);
 
     let mut model_snap: Option<Box<dyn Snapshot>> = None;
-    let mut db_snap: Option<Box<dyn Snapshot>> = None;
-
-    let mut k = String::new();
-    let mut v = String::new();
+    let mut db_snap = execution_controls::DatabaseSnapshotLease::new();
 
     let mut last_key = String::new();
     let mut last_value_length_bytes: usize = 0usize;
@@ -356,28 +365,22 @@ fn bitcoinleveldbt_randomized_execute_prefix_and_return_first_failure(
         BitcoinLevelDbTRandomizedBisectOperationKindField::NoneYet;
     let mut last_operation_selector_probability: u32 = 0u32;
 
+    execution_controls::progress("db_test_bisect_randomized", option_configuration_index as usize, 0, executed_prefix_length as usize, "configuration.entry");
     let mut step: i32 = 0i32;
     while step < executed_prefix_length {
-        let p = rnd.uniform(100);
-        last_operation_selector_probability = p;
+        if step % 100 == 0 {
+            execution_controls::progress("db_test_bisect_randomized", option_configuration_index as usize, step as usize, executed_prefix_length as usize, "iteration");
+        }
+        let operation = operations.next_operation();
+        last_operation_selector_probability = operation.selector;
+        last_key = operation.last_key.clone();
+        last_value_length_bytes = operation.last_value_length_bytes;
         last_write_batch_operation_count = 0i32;
 
-        match p {
-            0u32..=44u32 => {
+        match operation.mutation {
+            Mutation::Put { key: k, value: v } => {
                 last_operation_kind =
                     BitcoinLevelDbTRandomizedBisectOperationKindField::Put;
-
-                k = dbtest_random_key((&mut rnd) as *mut Random);
-                v = dbtest_random_string(
-                    (&mut rnd) as *mut Random,
-                    match rnd.one_in(20) {
-                        true => 100i32 + (rnd.uniform(100) as i32),
-                        false => rnd.uniform(8) as i32,
-                    },
-                );
-
-                last_key = k.clone();
-                last_value_length_bytes = v.len();
 
                 let write_options = WriteOptions::default();
                 let ks = Slice::from(&k);
@@ -483,14 +486,9 @@ fn bitcoinleveldbt_randomized_execute_prefix_and_return_first_failure(
                     }
                 }
             }
-            45u32..=89u32 => {
+            Mutation::Delete { key: k } => {
                 last_operation_kind =
                     BitcoinLevelDbTRandomizedBisectOperationKindField::Delete;
-
-                k = dbtest_random_key((&mut rnd) as *mut Random);
-
-                last_key = k.clone();
-                last_value_length_bytes = 0usize;
 
                 let write_options = WriteOptions::default();
                 let ks = Slice::from(&k);
@@ -595,47 +593,21 @@ fn bitcoinleveldbt_randomized_execute_prefix_and_return_first_failure(
                     }
                 }
             }
-            90u32..=99u32 => {
+            Mutation::Batch(updates) => {
                 last_operation_kind =
                     BitcoinLevelDbTRandomizedBisectOperationKindField::WriteBatch;
 
                 let mut b = WriteBatch::default();
-                let num = rnd.uniform(8) as i32;
-                last_write_batch_operation_count = num;
-
-                let mut i: i32 = 0i32;
-                while i < num {
-                    match i == 0i32 || !rnd.one_in(10) {
-                        true => {
-                            k = dbtest_random_key((&mut rnd) as *mut Random);
+                last_write_batch_operation_count = updates.len() as i32;
+                for update in updates {
+                    match update {
+                        BatchMutation::Put { key, value } => {
+                            b.put(&Slice::from(&key), &Slice::from(&value));
                         }
-                        false => {
-                            // Periodically re-use the same key from the previous iter, so
-                            // we have multiple entries in the write batch for the same key
+                        BatchMutation::Delete { key } => {
+                            b.delete(&Slice::from(&key));
                         }
                     }
-
-                    match rnd.one_in(2) {
-                        true => {
-                            v = dbtest_random_string(
-                                (&mut rnd) as *mut Random,
-                                rnd.uniform(10) as i32,
-                            );
-                            let ks = Slice::from(&k);
-                            let vs = Slice::from(&v);
-                            b.put(&ks, &vs);
-                            last_value_length_bytes = v.len();
-                        }
-                        false => {
-                            let ks = Slice::from(&k);
-                            b.delete(&ks);
-                            last_value_length_bytes = 0usize;
-                        }
-                    }
-
-                    last_key = k.clone();
-
-                    i += 1i32;
                 }
 
                 let write_options = WriteOptions::default();
@@ -745,15 +717,6 @@ fn bitcoinleveldbt_randomized_execute_prefix_and_return_first_failure(
                         return Some(failure_observation);
                     }
                 }
-            }
-            _ => {
-                error!(
-                    target: "bitcoinleveldbt_randomized::randomized",
-                    event = "bitcoinleveldbt_randomized_execute_prefix_and_return_first_failure_invalid_probability",
-                    label = "bitcoinleveldbt_randomized.execute_prefix_and_return_first_failure.invalid_probability",
-                    p = p
-                );
-                panic!();
             }
         }
 
@@ -935,7 +898,7 @@ fn bitcoinleveldbt_randomized_execute_prefix_and_return_first_failure(
                 }
 
                 model_snap = Some(model.get_snapshot());
-                db_snap = Some(unsafe { (*dbtest.dbfull()).get_snapshot() });
+                unsafe { db_snap.acquire(dbtest.dbfull() as *mut dyn DB); }
             }
             false => {}
         }
@@ -958,6 +921,8 @@ fn bitcoinleveldbt_randomized_execute_prefix_and_return_first_failure(
         }
         None => {}
     }
+
+    execution_controls::progress("db_test_bisect_randomized", option_configuration_index as usize, step as usize, executed_prefix_length as usize, "configuration.return");
 
     trace!(
         target: "bitcoinleveldbt_randomized::randomized",
@@ -1139,10 +1104,12 @@ fn bitcoinleveldbt_randomized_bisect_minimal_failing_prefix_for_option_configura
 
 }
 
-#[traced_test]
+#[test]
+#[ignore = "long stress; use a resource-controlled runner explicitly"]
 fn db_test_bisect_randomized() {
+    execution_controls::require_stress_protection("db_test_bisect_randomized");
     let seed = random_seed() as u32;
-    let executed_prefix_length: i32 = 10000i32;
+    let executed_prefix_length: i32 = LEGACY_STEPS_PER_CONFIGURATION as i32;
 
     let first_failure_observation =
         bitcoinleveldbt_randomized_run_across_option_configurations_and_return_first_failure(
@@ -1151,7 +1118,10 @@ fn db_test_bisect_randomized() {
         );
 
     match first_failure_observation {
-        None => {}
+        None => {
+            execution_controls::complete("db_test_bisect_randomized", OPTION_CONFIGURATION_COUNT,
+                                         OPTION_CONFIGURATION_COUNT * LEGACY_STEPS_PER_CONFIGURATION);
+        }
         Some(first_failure) => {
             let bisected_failure =
                 bitcoinleveldbt_randomized_bisect_minimal_failing_prefix_for_option_configuration(
@@ -1194,3 +1164,5 @@ fn db_test_bisect_randomized() {
     }
 
 }
+
+

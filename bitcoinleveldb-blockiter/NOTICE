@@ -1,0 +1,32 @@
+bitcoinleveldb-blockiter source and attribution
+
+Part of https://github.com/klebs6/bitcoin-rs.
+Package distribution expression: MIT AND BSD-3-Clause.
+
+LICENSE retains the existing repository MIT notice. Original notices,
+source comments and Git authorship remain unchanged.
+
+Included translated/adapted LevelDB material retains BSD-3-Clause
+conditions alongside the repository MIT context and Rust additions. The
+AND expression records cumulative conditions; it does not offer a choice
+of licenses or attribute every local helper/test to upstream.
+
+Upstream source/header reference checks used bitcoin/bitcoin v22.0.
+This is a reproducible comparison snapshot, not a claim that it was the
+exact historical input revision of the Rust port.
+
+Corresponding upstream files and retained header notices:
+
+- src/leveldb/table/block.cc
+  https://github.com/bitcoin/bitcoin/blob/v22.0/src/leveldb/table/block.cc
+  Copyright (c) 2011 The LevelDB Authors. All rights reserved.
+
+The full LevelDB and CRC32C BSD texts remain in LICENSE.leveldb and
+LICENSE.crc32c. Additional retained texts are reference/closure notices,
+not a claim that every listed upstream work appears in this package.
+External Cargo dependencies retain their own license declarations.
+
+The repository record doc/release/leveldb-source-attribution101.json
+indexes every included code file by hash and records the source witnesses
+and package conclusions. New Rust adaptations/tests are distinguished from
+upstream references; exact historical ancestry is not asserted.

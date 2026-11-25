@@ -26,11 +26,11 @@ version = "1.1.0"
 workspace = true
 
 [package]
-authors = ["klebs <none>"]
-description = "High-performance CRC32C (Castagnoli) implementation with runtime-dispatched SSE4.2 and AArch64 backends plus a portable fallback, suitable for streaming integrity checks in Bitcoin and other systems code."
+authors = ["klebs"]
+description = "CRC32C byte-buffer checksums with incremental extension, portable implementation and architecture-specific dispatch."
 documentation = "https://docs.rs/bitcoin-crc32c"
 edition = "2021"
-license = "MIT"
+license = "MIT AND BSD-3-Clause"
 name = "bitcoin-crc32c"
 repository = "https://github.com/klebs6/bitcoin-rs"
 version = "0.1.19"

@@ -47,6 +47,11 @@ impl CondvarSignalExt for Condvar {
 #[cfg(test)]
 mod condvar_signal_ext_wiring_contract_suite_20260303 {
     use super::*;
+    use super::parking_lot::{Condvar, Mutex as ParkingMutex};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
 
     struct CondvarSignalExtHandshakeState_20260303 {
         ready: bool,
@@ -69,7 +74,7 @@ mod condvar_signal_ext_wiring_contract_suite_20260303 {
             case = "signal"
         );
 
-        let state: Arc<Mutex<CondvarSignalExtHandshakeState_20260303>> = Arc::new(Mutex::new(
+        let state: Arc<ParkingMutex<CondvarSignalExtHandshakeState_20260303>> = Arc::new(ParkingMutex::new(
             CondvarSignalExtHandshakeState_20260303 {
                 ready: false,
                 go: false,
@@ -201,7 +206,7 @@ mod condvar_signal_ext_wiring_contract_suite_20260303 {
             waiters = 2u64
         );
 
-        let state: Arc<Mutex<CondvarSignalAllExtHandshakeState_20260303>> = Arc::new(Mutex::new(
+        let state: Arc<ParkingMutex<CondvarSignalAllExtHandshakeState_20260303>> = Arc::new(ParkingMutex::new(
             CondvarSignalAllExtHandshakeState_20260303 {
                 ready_count: 0,
                 go: false,

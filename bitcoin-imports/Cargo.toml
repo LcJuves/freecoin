@@ -66,8 +66,8 @@ try-catch.workspace             = true
 winapi.workspace                = true
 
 [package]
-authors = ["klebs <none>"]
-description = "encapsulates most third party deps for the bitcoin ecosystem"
+authors = ["klebs"]
+description = "Shared nightly Rust prelude, dependency re-exports and compatibility helpers for bitcoin-rs."
 documentation = "https://docs.rs/bitcoin-imports"
 edition = "2021"
 license = "MIT"
